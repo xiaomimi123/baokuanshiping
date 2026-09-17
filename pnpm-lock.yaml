@@ -32,6 +32,18 @@ importers:
         specifier: ^3.0.0
         version: 3.2.7(@types/node@22.20.3)(tsx@4.23.13)
 
+  projects/default/packages/provider-volcengine:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.3
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.7(@types/node@22.20.3)(tsx@4.23.13)
+
   server:
     dependencies:
       '@fastify/static':

@@ -24,7 +24,9 @@ hpyit爆款视频复刻/
     │   └── src/pages/          # 总览 / 模型与服务 / 任务 / Studio 四个页面
     └── projects/default/       # Hypit 项目本地包（git 跟踪源码，dist/ 不跟踪）
         └── packages/
-            └── provider-openai-image/   # 直连 OpenAI 兼容生图 Provider（骨架，逻辑见 Task 2）
+            ├── provider-openai-image/  # 直连 OpenAI 兼容生图 Provider（gpt-image-2，immediate）
+            ├── provider-gemini-image/  # 直连 Gemini 生图 Provider（nano-banana-2/pro，immediate）
+            └── provider-volcengine/    # 直连火山引擎方舟 Provider（Seedance 异步 + Seedream immediate）
 ```
 
 Docker Compose 两个服务共享同一镜像：
@@ -100,7 +102,12 @@ Docker 中 `HYPIT_REPO=/opt/hypit`、`HYPIT_PROJECT=/projects/default` 已在 `d
    ```
 
    然后在工作台「模型与服务」页填入 API Key（凭据以文件形式存放在容器内 `credentials/` 目录，随 `hypit-home` 卷持久化），可按需调整总并发与每模型能力并发。
-2. **自建直连 Provider（用你自己的各厂商 API Key，开发中）**：源码放在 `projects/default/packages/`（git 跟踪，`dist/` 不跟踪），按 `docs/superpowers/specs/2026-09-17-direct-providers-design.md` 实现，参考上游 `examples/provider-package/`。当前已接入 `provider-openai-image` 骨架（`openai.images` endpoint，绑定 `@hypit/gpt-image@1#gpt-image-2`）；`handler` 尚未实现真实调用逻辑。开发前先 `pnpm providers:setup && pnpm providers:build`。
+2. **自建直连 Provider（用你自己的各厂商 API Key）**：源码放在 `projects/default/packages/`（git 跟踪，`dist/` 不跟踪），按 `docs/superpowers/specs/2026-09-17-direct-providers-design.md` 实现，参考上游 `examples/provider-package/`。已接入三个 Provider 包：
+   - `provider-openai-image`（`openai.images` endpoint，绑定 `@hypit/gpt-image@1#gpt-image-2`，immediate）；
+   - `provider-gemini-image`（`gemini.images` endpoint，绑定 `@hypit/nano-banana@1#nano-banana-2` / `#nano-banana-pro`，immediate）；
+   - `provider-volcengine`（`volcengine.default` endpoint，绑定 `@hypit/seedance@1` 的 4 个能力（asynchronous，方舟异步任务：提交 → 轮询 → 下载视频）+ `@hypit/seedream@1#seedream-5-lite`（immediate））。
+
+   三者的 `apiKey`（以及火山引擎的 `modelMap`）均需在 Runtime Profile 中配置后才能实际出片；`modelMap` 留空的能力会在调用时报中文错误，提示到对应厂商控制台确认模型 ID。开发前先 `pnpm providers:setup && pnpm providers:build`。
 
 本地渲染（HyperFrames）与本地媒体处理不需要额外配置，容器内已固定使用 `chromium-nosandbox` 包装脚本 + 软件渲染（`browserGpu: "software"`）。
 
