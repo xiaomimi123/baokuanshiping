@@ -132,6 +132,7 @@ Docker 中 `HYPIT_REPO=/opt/hypit`、`HYPIT_PROJECT=/projects/default` 已在 `d
 - **凭据 file store 为明文卷**：容器内没有 OS 级钥匙串，`@hypit/credential-store-file` 把 API Key 明文存放在 `hypit-home` 卷下的 `credentials/` 目录中，仅适合本机单人使用场景，不要把该卷同步到不受信任的位置。
 - **单人 / 无鉴权**：Compose 只绑定 `127.0.0.1`，不做多用户或登录鉴权，不要直接暴露到公网。
 - **语音能力暂无直连 Provider**：本轮只做了生图 / 生视频三家（火山引擎、OpenAI 兼容、Gemini）的直连 Provider；语音合成（TTS）/ 转写目前只能走 HypiHub 托管网关（ElevenLabs/FishAudio、WhisperX），没有自建直连实现。
+- **容器内改了 provider 源码要自己重新编译，entrypoint 不会自动重编译**：`docker/entrypoint-*.sh` 启动时只在 `/projects/default/packages/<pkg>` **缺失整个目录**或**缺失 `dist/`** 时，才从镜像内种子（`/opt/workbench-providers`）补一份源码+产物；如果你在容器里改了某个 provider 包的 `src/` 但没删/没建它自己的 `dist/`，entrypoint 不会重编也不会同步，跑的还是旧 `dist/`，源码和产物会悄悄不一致。改完源码后要自己重建：宿主机上 `pnpm providers:build`（`pnpm --filter '@workbench/provider-*' run build`），或容器内等效地对该包跑 `tsc -p tsconfig.json`。同理，如果手动删掉了某包的 `dist/` 想"重新触发种子同步"，补回来的也是**镜像构建时的旧版本 dist**，不是你改过的源码编译结果——想要新代码生效，必须自己跑一次 build，而不是依赖 entrypoint 的兜底同步。
 - **前端能力范围收窄**：当前版本未实现 spec 中的三项前端能力——Build 产物画廊/内联预览、WhisperX 配置卡、Profile 保存前 diff 预览；后端产物下载接口（`GET /api/builds/:id/outputs/:name`）已就绪，留待后续迭代接入前端。
 - **`docker compose restart` 会连带杀掉 workbench**：`workbench` 与 `runtime` 共享 PID 命名空间（`pid: "service:runtime"`），重启 runtime 容器会销毁该命名空间导致 workbench 以 137 退出。重启后用 `docker compose up -d` 把 workbench 拉回，或直接用 `docker compose down && docker compose up -d`。
 
