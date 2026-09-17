@@ -87,7 +87,9 @@ export function createGeminiImageProvider(options: CreateGeminiImageProviderOpti
 
       const imageConfig: Record<string, unknown> = {};
       if (aspectRatio !== undefined) imageConfig.aspectRatio = aspectRatio;
-      if (resolution !== undefined) imageConfig.imageSize = resolution;
+      // imageSize is a Pro-only field; nano-banana-2 only ever accepts 1K, which is already the
+      // server-side default, so we never send imageConfig.imageSize for it (see supports()).
+      if (resolution !== undefined && capabilityName === "nano-banana-pro") imageConfig.imageSize = resolution;
 
       const response = await fetcher(`${base}/v1beta/models/${model}:generateContent`, {
         method: "POST",

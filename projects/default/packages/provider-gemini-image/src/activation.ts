@@ -9,6 +9,15 @@ const DEFAULT_MODEL_MAP: Readonly<Record<string, string>> = {
   "nano-banana-pro": "gemini-3-pro-image-preview",
 };
 
+// A blank/missing modelMap.<capability> value must never fail Runtime Profile activation for the
+// *other* endpoints sharing it (activatedEndpoints loads all endpoints via one Promise.all with no
+// per-item try/catch) — so we fall back to the default model ID here instead of throwing. If the
+// resolved model ID is still empty, createGeminiImageProvider()'s handler raises the Chinese error
+// at request time, scoping the failure to a single capability instead of the whole profile.
+function resolveModelId(rawValue: unknown, fallback: string): string {
+  return typeof rawValue === "string" && rawValue.trim().length > 0 ? rawValue : fallback;
+}
+
 export default {
   format: "hypit.node-package@1" as const,
   hostFacets: [createRuntimeEndpointAdapterFacet({
@@ -22,8 +31,7 @@ export default {
       const modelMap: Record<string, string> = { ...DEFAULT_MODEL_MAP };
       if (modelMapConfig !== undefined) {
         for (const key of Object.keys(DEFAULT_MODEL_MAP)) {
-          const value = runtimeConfigString(modelMapConfig[key], `modelMap.${key}`);
-          if (value !== undefined) modelMap[key] = value;
+          modelMap[key] = resolveModelId(modelMapConfig[key], DEFAULT_MODEL_MAP[key]!);
         }
       }
       if (!apiKey || !context.pool) throw new Error("gemini.images 需要 apiKey 凭据引用");

@@ -4,6 +4,7 @@ import type { BlobRef, EndpointInvocationContext, EndpointRequest } from "@hypit
 import { canonicalize } from "@hypit/hypit/endpoint-kit";
 import { generationTypes } from "@hypit/hypit/generation";
 import { capabilityNanoBanana2, capabilityNanoBananaPro, createGeminiImageProvider } from "../src/provider.js";
+import activationModule from "../src/activation.js";
 
 function need(
   capability: typeof capabilityNanoBanana2 | typeof capabilityNanoBananaPro,
@@ -135,5 +136,79 @@ describe("Gemini（Nano Banana）图像 Provider", () => {
     if (resolution.status !== "unsupported") throw new Error("unreachable");
     expect(resolution.rejections[0]?.reason.length).toBeGreaterThan(0);
     expect(resolution.rejections[0]?.reason).toMatch(/[一-鿿]/u);
+  });
+
+  it("nano-banana-2 + resolution 1K 时请求体不含 imageConfig.imageSize（imageSize 仅 Pro 模型可用）", async () => {
+    const resources = new MemoryResourceStore();
+    let seenBody: Record<string, unknown> | undefined;
+    const provider = createGeminiImageProvider({
+      instance: "gemini.images", pool: "gemini.images", baseUrl: "https://generativelanguage.googleapis.com",
+      apiKey: { store: "file", key: "gemini.images" }, modelMap: DEFAULT_MODEL_MAP,
+      fetch: async (_input, init) => {
+        seenBody = JSON.parse(String(init?.body));
+        return Response.json({ candidates: [{ content: { parts: [{ inlineData: { mimeType: "image/png", data: B64_A } }] } }] });
+      },
+    });
+    const registry = new EndpointRegistry();
+    await provider.install(registry);
+    const request = need(capabilityNanoBanana2, { prompt: ["一只猫"], aspectRatio: ["1:1"], resolution: ["1K"] });
+    const resolution = registry.resolve(request);
+    expect(resolution.status).toBe("resolved");
+    if (resolution.status !== "resolved" || resolution.registration.kind !== "immediate") throw new Error("unreachable");
+    const context: EndpointInvocationContext = {
+      command: { kind: "fulfill-need", id: "command:no-image-size", need: request },
+      need: request,
+      resources,
+      credentials: { apiKey: { secret: "test-key" } },
+    };
+    await resolution.registration.handler(context);
+    const imageConfig = seenBody?.generationConfig as { imageConfig?: Record<string, unknown> } | undefined;
+    expect(imageConfig?.imageConfig?.aspectRatio).toBe("1:1");
+    expect(imageConfig?.imageConfig?.imageSize).toBeUndefined();
+  });
+
+  it("activation：modelMap.nano-banana-2 为空字符串时不抛错，回落到默认模型 ID", async () => {
+    const resources = new MemoryResourceStore();
+    let seenUrl: string | undefined;
+    const activate = activationModule.hostFacets[0]?.implementation as {
+      activate: (context: {
+        hostStateRoot: string; dataRoot: string; instance: string; pool?: string; config: unknown;
+      }) => { endpoint: ReturnType<typeof createGeminiImageProvider> } | Promise<{ endpoint: ReturnType<typeof createGeminiImageProvider> }>;
+    };
+    // activation.ts does not pass a `fetch` override, so createGeminiImageProvider() captures
+    // globalThis.fetch at activation time — the spy must be installed BEFORE calling activate().
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      seenUrl = String(input);
+      return Response.json({ candidates: [{ content: { parts: [{ inlineData: { mimeType: "image/png", data: B64_A } }] } }] });
+    }) as typeof fetch;
+    try {
+      const activation = await activate.activate({
+        hostStateRoot: "", dataRoot: "", instance: "gemini.images", pool: "gemini.images",
+        config: canonicalize({
+          baseUrl: "https://generativelanguage.googleapis.com",
+          apiKey: { store: "file", key: "gemini.images" },
+          modelMap: { "nano-banana-2": "", "nano-banana-pro": "gemini-3-pro-image-preview" },
+          defaultConcurrency: 2,
+          requestTimeoutMs: 180000,
+        }),
+      });
+      const registry = new EndpointRegistry();
+      await activation.endpoint.install(registry);
+      const request = need(capabilityNanoBanana2, { prompt: ["一只猫"], aspectRatio: ["1:1"] });
+      const resolved = registry.resolve(request);
+      expect(resolved.status).toBe("resolved");
+      if (resolved.status !== "resolved" || resolved.registration.kind !== "immediate") throw new Error("unreachable");
+      const context: EndpointInvocationContext = {
+        command: { kind: "fulfill-need", id: "command:activation-fallback", need: request },
+        need: request,
+        resources,
+        credentials: { apiKey: { secret: "test-key" } },
+      };
+      await resolved.registration.handler(context);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(seenUrl).toBe("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent");
   });
 });
