@@ -1,0 +1,28 @@
+services:
+  runtime:
+    build:
+      context: ../..
+      dockerfile: hypit-workbench/docker/Dockerfile
+    image: hypit-workbench:latest
+    entrypoint: /usr/local/bin/entrypoint-runtime.sh
+    volumes:
+      - ../projects:/projects
+      - hypit-home:/home/node
+    restart: unless-stopped
+
+  workbench:
+    image: hypit-workbench:latest
+    depends_on: [runtime]
+    entrypoint: /usr/local/bin/entrypoint-workbench.sh
+    environment:
+      - STUDIO_PORT=5180
+    volumes:
+      - ../projects:/projects
+      - hypit-home:/home/node
+    ports:
+      - "127.0.0.1:8090:8090"
+      - "127.0.0.1:5179:5179"
+    restart: unless-stopped
+
+volumes:
+  hypit-home:

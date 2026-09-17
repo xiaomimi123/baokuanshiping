@@ -1,0 +1,8 @@
+hypit/node_modules
+hypit/**/node_modules
+hypit/.git
+hypit-workbench/node_modules
+hypit-workbench/**/node_modules
+hypit-workbench/web/dist
+hypit-workbench/.git
+**/.DS_Store

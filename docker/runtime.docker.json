@@ -1,0 +1,28 @@
+{
+  "format": "hypit.runtime-local@1",
+  "dataRoot": ".hypit/runtimes/local",
+  "credentials": {
+    "file": { "use": "@hypit/credential-store-file", "config": { "path": "credentials" } }
+  },
+  "endpoints": {
+    "hypihub.default": {
+      "use": "@hypit/provider-hypihub",
+      "config": {
+        "baseUrl": "https://hypit.ai",
+        "apiKey": { "store": "file", "key": "hypihub.oauth" },
+        "defaultConcurrency": 3
+      }
+    },
+    "media.local": { "use": "@hypit/provider-media-local" },
+    "hyperframes.local": {
+      "use": "@hypit/provider-hyperframes-local",
+      "config": {
+        "chromePath": "/usr/local/bin/chromium-nosandbox",
+        "browserGpu": "software",
+        "workers": 2,
+        "maxWorkers": 4,
+        "defaultConcurrency": 1
+      }
+    }
+  }
+}
