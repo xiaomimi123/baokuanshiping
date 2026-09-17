@@ -78,6 +78,7 @@ describe("OpenAI 兼容图像 Provider", () => {
         expect(form.get("size")).toBe("1024x1024");
         const uploaded = form.get("image[]") as Blob;
         expect(uploaded).toBeInstanceOf(Blob);
+        expect(uploaded.type).toBe("image/png");
         expect(new Uint8Array(await uploaded.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
         return Response.json({ data: [{ b64_json: B64_PNG }] });
       },
