@@ -4,5 +4,6 @@ hypit/.git
 hypit-workbench/node_modules
 hypit-workbench/**/node_modules
 hypit-workbench/web/dist
+hypit-workbench/projects/default/packages/*/dist
 hypit-workbench/.git
 **/.DS_Store

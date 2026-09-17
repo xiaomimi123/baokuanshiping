@@ -1,6 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 mkdir -p /projects/default
+/usr/local/bin/sync-providers.sh
 cd /projects/default
 if [ ! -f hypit.runtime.json ]; then cp /opt/runtime.docker.json hypit.runtime.json; fi
 node /opt/hypit/bin/hypit.mjs runtime use hypit.runtime.json

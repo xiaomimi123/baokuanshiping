@@ -1,6 +1,14 @@
 {
   "format": "hypit.runtime-local@1",
   "dataRoot": ".hypit/runtimes/local",
+  "credentials": {
+    "file": {
+      "use": "@hypit/credential-store-file",
+      "config": {
+        "path": "credentials"
+      }
+    }
+  },
   "endpoints": {
     "media.local": { "use": "@hypit/provider-media-local" },
     "hyperframes.local": {
@@ -12,6 +20,56 @@
         "maxWorkers": 4,
         "defaultConcurrency": 1
       }
+    },
+    "volcengine.default": {
+      "use": "@workbench/provider-volcengine",
+      "config": {
+        "baseUrl": "https://ark.cn-beijing.volces.com",
+        "apiKey": { "store": "file", "key": "volcengine.ark" },
+        "modelMap": {
+          "seedance-2": "",
+          "seedance-2-fast": "",
+          "seedance-2-mini": "",
+          "seedance-2.5": "",
+          "seedream-5-lite": ""
+        },
+        "defaultConcurrency": 2,
+        "pollIntervalMs": 8000,
+        "requestTimeoutMs": 120000
+      }
+    },
+    "openai.images": {
+      "use": "@workbench/provider-openai-image",
+      "config": {
+        "baseUrl": "https://api.openai.com",
+        "apiKey": { "store": "file", "key": "openai.images" },
+        "wireModel": "gpt-image-1",
+        "defaultConcurrency": 2,
+        "requestTimeoutMs": 180000
+      }
+    },
+    "gemini.images": {
+      "use": "@workbench/provider-gemini-image",
+      "config": {
+        "baseUrl": "https://generativelanguage.googleapis.com",
+        "apiKey": { "store": "file", "key": "gemini.images" },
+        "modelMap": {
+          "nano-banana-2": "gemini-2.5-flash-image",
+          "nano-banana-pro": "gemini-3-pro-image-preview"
+        },
+        "defaultConcurrency": 2,
+        "requestTimeoutMs": 180000
+      }
     }
+  },
+  "bindings": {
+    "@hypit/seedance@1#seedance-2": "volcengine.default",
+    "@hypit/seedance@1#seedance-2-fast": "volcengine.default",
+    "@hypit/seedance@1#seedance-2-mini": "volcengine.default",
+    "@hypit/seedance@1#seedance-2.5": "volcengine.default",
+    "@hypit/seedream@1#seedream-5-lite": "volcengine.default",
+    "@hypit/gpt-image@1#gpt-image-2": "openai.images",
+    "@hypit/nano-banana@1#nano-banana-2": "gemini.images",
+    "@hypit/nano-banana@1#nano-banana-pro": "gemini.images"
   }
 }

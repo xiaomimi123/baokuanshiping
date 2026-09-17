@@ -30,10 +30,24 @@ COPY hypit-workbench/server/ server/
 COPY hypit-workbench/web/ web/
 RUN pnpm --filter @workbench/web build
 
+# 直连 Provider 包（源码入库，见 hypit-workbench/projects/default/packages）：
+# 镜像内种子目录 /opt/workbench-providers，供 entrypoint 首次同步到 /projects/default（bind mount）。
+# 编译期只需 typecheck+emit，不跑 pnpm install：SDK 用 symlink 指向 /opt/hypit（源码即类型，见 spec §7），
+# @types/node 借用 workbench 已装的（server/node_modules/@types，ancestor 目录，tsc 默认 typeRoots 会向上找）。
+COPY hypit-workbench/projects/default/ /opt/workbench-providers/
+RUN mkdir -p /opt/workbench-providers/node_modules/@hypit \
+    && ln -sfn /opt/hypit /opt/workbench-providers/node_modules/@hypit/hypit \
+    && ln -sfn /opt/workbench/server/node_modules/@types /opt/workbench-providers/node_modules/@types \
+    && for pkg in /opt/workbench-providers/packages/*/; do \
+         echo "building provider package: $pkg"; \
+         node /opt/workbench/server/node_modules/typescript/bin/tsc -p "${pkg}tsconfig.json"; \
+       done
+
+COPY hypit-workbench/docker/sync-providers.sh /usr/local/bin/sync-providers.sh
 COPY hypit-workbench/docker/entrypoint-runtime.sh /usr/local/bin/entrypoint-runtime.sh
 COPY hypit-workbench/docker/entrypoint-workbench.sh /usr/local/bin/entrypoint-workbench.sh
 COPY hypit-workbench/docker/runtime.docker.json /opt/runtime.docker.json
-RUN chmod +x /usr/local/bin/entrypoint-*.sh && chown -R node:node /opt
+RUN chmod +x /usr/local/bin/*.sh && chown -R node:node /opt
 
 USER node
 ENV HYPIT_REPO=/opt/hypit HYPIT_PROJECT=/projects/default

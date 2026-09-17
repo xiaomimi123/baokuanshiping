@@ -91,23 +91,37 @@ Docker 中 `HYPIT_REPO=/opt/hypit`、`HYPIT_PROJECT=/projects/default` 已在 `d
 
 **默认配置不接入任何生成模型服务**（纯本地：HyperFrames 渲染 + 本地媒体处理）。纯字幕 / 动效 / 代码渲染的视频不需要模型服务，开箱即用。
 
-需要 AI 生图 / 生视频 / 语音合成时，有两条路：
+需要 AI 生图 / 生视频时，默认路径是**直连各厂商自己的 API Key**（火山引擎方舟 / OpenAI 兼容 / Gemini），源码入库在 `projects/default/packages/`（git 跟踪，`dist/` 不跟踪），按 `docs/superpowers/specs/2026-09-17-direct-providers-design.md` 实现，参考上游 `examples/provider-package/`。Docker 镜像已内置这三个 Provider 包的编译产物作种子（容器首次启动时同步到 `/projects/default/packages`），`docker/runtime.docker.json` 模板里三个 endpoint + 8 条 binding 已经就绪，只缺 API Key。
 
-1. **HypiHub 托管网关（上游官方方案）**：Hypit 官方发行版中，所有生成模型（Seedance、Seedream、GPT Image、Nano Banana、Grok Imagine、MiniMax、ElevenLabs/FishAudio 语音、WhisperX 云端转写等）统一经由 `@hypit/provider-hypihub` 调用。启用方法：在 Runtime Profile（`/projects/default/hypit.runtime.json`）的 `endpoints` 中加回：
+已接入三个 Provider 包，对应工作台 Models 页的三张卡：
 
-   ```json
-   "credentials": { "file": { "use": "@hypit/credential-store-file", "config": { "path": "credentials" } } },
-   "endpoints": { "hypihub.default": { "use": "@hypit/provider-hypihub",
-     "config": { "baseUrl": "https://hypit.ai", "apiKey": { "store": "file", "key": "hypihub.oauth" }, "defaultConcurrency": 3 } }, ... }
-   ```
+- **火山引擎方舟卡**（`provider-volcengine` → `volcengine.default` endpoint）：绑定 `@hypit/seedance@1` 的 4 个能力（asynchronous，方舟异步任务：提交 → 轮询 → 下载视频）+ `@hypit/seedream@1#seedream-5-lite`（immediate）。填写项：
+  - **API Key**：方舟控制台的 API Key（火山引擎控制台 → 方舟大模型服务 → API Key 管理）。
+  - **baseUrl**：默认 `https://ark.cn-beijing.volces.com`，一般不需要改（除非用了其他 region 的接入点）。
+  - **模型 ID（5 项 modelMap）**：Seedance/Seedream 的具体模型 ID **因账号开通情况而异**，默认是空字符串，必须自己去方舟控制台确认后填入——路径：方舟控制台 → 模型广场（或「我的推理接入点」）→ 找到已开通的 Seedance / Seedream 模型 → 复制其 Model ID（不是模型名称，通常形如 `doubao-seedance-1-0-...` 之类的版本化 ID）。留空的能力调用时会报中文错误，提示去控制台确认。
+- **OpenAI 兼容卡**（`provider-openai-image` → `openai.images` endpoint）：绑定 `@hypit/gpt-image@1#gpt-image-2`（immediate，`images` API）。填写项：
+  - **API Key**：OpenAI 平台 Key，或中转站签发的 Key。
+  - **baseUrl**：默认 `https://api.openai.com`；**接中转站只改这一项**，填中转站的 base URL（不含路径后缀，Provider 内部会拼接标准 `images`/`edits` 端点路径）。Provider 只承诺兼容 OpenAI 官方 `images` API 的请求/响应形状，中转站若做了非标准改造（字段增删、鉴权方式不同）不保证可用，出问题先用「测试」按钮跑 `doctor` 排查。
+  - **模型 ID（wireModel）**：默认 `gpt-image-1`；中转站可能用别的模型名代理同一能力，按中转站文档改。
+- **Gemini 卡**（`provider-gemini-image` → `gemini.images` endpoint）：绑定 `@hypit/nano-banana@1#nano-banana-2` / `#nano-banana-pro`（immediate）。填写项：
+  - **API Key**：Google AI Studio / Gemini API Key。
+  - **baseUrl**：默认 `https://generativelanguage.googleapis.com`。
+  - **模型 ID（2 项 modelMap）**：默认 `gemini-2.5-flash-image` / `gemini-3-pro-image-preview`，一般不需要改，Google 更新模型代号时在此改即可。
+  - **联调提示**：Provider 走的是 Gemini 经典的 `generateContent` 契约（`contents`/`parts` 结构）。Google 官方文档目前把首页流量导向新的 Interactions API，但 `generateContent` 端点本身当前仍在服务；**如果真实调用返回 404**，大概率是 Google 那边接口迁移影响到了具体模型/版本的可用性，先用「测试」按钮的 `doctor` 排查，并对照 Gemini 官方最新文档确认 `generateContent` 端点路径与模型名是否变化——这是本 Provider 相对官方文档漂移风险最高的一环。
 
-   然后在工作台「模型与服务」页填入 API Key（凭据以文件形式存放在容器内 `credentials/` 目录，随 `hypit-home` 卷持久化），可按需调整总并发与每模型能力并发。
-2. **自建直连 Provider（用你自己的各厂商 API Key）**：源码放在 `projects/default/packages/`（git 跟踪，`dist/` 不跟踪），按 `docs/superpowers/specs/2026-09-17-direct-providers-design.md` 实现，参考上游 `examples/provider-package/`。已接入三个 Provider 包：
-   - `provider-openai-image`（`openai.images` endpoint，绑定 `@hypit/gpt-image@1#gpt-image-2`，immediate）；
-   - `provider-gemini-image`（`gemini.images` endpoint，绑定 `@hypit/nano-banana@1#nano-banana-2` / `#nano-banana-pro`，immediate）；
-   - `provider-volcengine`（`volcengine.default` endpoint，绑定 `@hypit/seedance@1` 的 4 个能力（asynchronous，方舟异步任务：提交 → 轮询 → 下载视频）+ `@hypit/seedream@1#seedream-5-lite`（immediate））。
+三者的 `apiKey` 均需配置后才能实际出片。可直接手改 Runtime Profile，也可在工作台「模型与服务」页操作：三张厂商卡按需「启用」（一键写入默认配置块 + 绑定），随后填 API Key（保存后不回显）、baseUrl、模型 ID，「测试」按钮调用 `doctor` 校验连通性。开发前先 `pnpm providers:setup && pnpm providers:build`；Docker 环境不需要这一步，镜像构建期已编译好。
 
-   三者的 `apiKey`（以及火山引擎的 `modelMap`）均需配置后才能实际出片；`modelMap` 留空的能力会在调用时报中文错误，提示到对应厂商控制台确认模型 ID。可直接手改 Runtime Profile，也可在工作台「模型与服务」页操作：三张厂商卡按需「启用」（一键写入默认配置块 + 绑定），随后填 API Key（保存后不回显）、baseUrl、模型 ID，「测试」按钮调用 `doctor` 校验连通性。开发前先 `pnpm providers:setup && pnpm providers:build`。
+首次真实出片前的自测步骤：填好某张卡的 Key 和模型 ID 后先点「测试」确认 `doctor` 无 error，再在具体项目里发起一次最小化的生成请求（例如 Seedream 单图 immediate 调用），确认产物能正常下载和预览，再放心跑批量任务。
+
+> **附注：HypiHub 托管网关（上游官方方案）**。如果你更想用 Hypit 官方托管网关而不是自己接各厂商 Key，Hypit 官方发行版支持所有生成模型（Seedance、Seedream、GPT Image、Nano Banana、Grok Imagine、MiniMax、ElevenLabs/FishAudio 语音、WhisperX 云端转写等）统一经由 `@hypit/provider-hypihub` 调用。启用方法：在 Runtime Profile（`/projects/default/hypit.runtime.json`）的 `endpoints` 中加回：
+>
+> ```json
+> "credentials": { "file": { "use": "@hypit/credential-store-file", "config": { "path": "credentials" } } },
+> "endpoints": { "hypihub.default": { "use": "@hypit/provider-hypihub",
+>   "config": { "baseUrl": "https://hypit.ai", "apiKey": { "store": "file", "key": "hypihub.oauth" }, "defaultConcurrency": 3 } }, ... }
+> ```
+>
+> 然后在工作台「模型与服务」页填入 API Key（凭据以文件形式存放在容器内 `credentials/` 目录，随 `hypit-home` 卷持久化）。HypiHub 和直连 Provider 可以同时配置，按 endpoint/binding 各自独立。
 
 本地渲染（HyperFrames）与本地媒体处理不需要额外配置，容器内已固定使用 `chromium-nosandbox` 包装脚本 + 软件渲染（`browserGpu: "software"`）。
 
@@ -117,6 +131,7 @@ Docker 中 `HYPIT_REPO=/opt/hypit`、`HYPIT_PROJECT=/projects/default` 已在 `d
 - **Studio 经 socat 转发**：`hypit studio` 只能监听 `127.0.0.1`，无法直接对容器外暴露；`workbench` 服务用 `socat` 把内部 `5180` 转发到对外 `5179`，多一跳网络代理，属预期行为而非 bug。
 - **凭据 file store 为明文卷**：容器内没有 OS 级钥匙串，`@hypit/credential-store-file` 把 API Key 明文存放在 `hypit-home` 卷下的 `credentials/` 目录中，仅适合本机单人使用场景，不要把该卷同步到不受信任的位置。
 - **单人 / 无鉴权**：Compose 只绑定 `127.0.0.1`，不做多用户或登录鉴权，不要直接暴露到公网。
+- **语音能力暂无直连 Provider**：本轮只做了生图 / 生视频三家（火山引擎、OpenAI 兼容、Gemini）的直连 Provider；语音合成（TTS）/ 转写目前只能走 HypiHub 托管网关（ElevenLabs/FishAudio、WhisperX），没有自建直连实现。
 - **前端能力范围收窄**：当前版本未实现 spec 中的三项前端能力——Build 产物画廊/内联预览、WhisperX 配置卡、Profile 保存前 diff 预览；后端产物下载接口（`GET /api/builds/:id/outputs/:name`）已就绪，留待后续迭代接入前端。
 - **`docker compose restart` 会连带杀掉 workbench**：`workbench` 与 `runtime` 共享 PID 命名空间（`pid: "service:runtime"`），重启 runtime 容器会销毁该命名空间导致 workbench 以 137 退出。重启后用 `docker compose up -d` 把 workbench 拉回，或直接用 `docker compose down && docker compose up -d`。
 
