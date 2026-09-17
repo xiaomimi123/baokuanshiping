@@ -20,12 +20,17 @@ export async function authRoutes(app: FastifyInstance) {
     runHypit(["auth", "status", req.params.endpoint]));
   app.post<{ Params: { endpoint: string }; Body: { secret: string; slot?: string } }>(
     "/api/auth/:endpoint",
-    async (req) =>
-      withSecretFile(req.body.secret, (file) =>
+    async (req, reply) => {
+      const secret = req.body?.secret;
+      if (typeof secret !== "string" || secret.length === 0) {
+        return reply.status(400).send({ error: { code: "E_BAD_SECRET", message: "secret 必须是非空字符串" } });
+      }
+      return withSecretFile(secret, (file) =>
         runHypit([
           "auth", "login", req.params.endpoint, "--from", file,
           ...(req.body.slot ? ["--slot", req.body.slot] : []),
-        ])),
+        ]));
+    },
   );
   app.delete<{ Params: { endpoint: string }; Querystring: { slot?: string } }>(
     "/api/auth/:endpoint",

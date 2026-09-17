@@ -22,10 +22,10 @@ COPY hypit/ ./
 RUN pnpm install --frozen-lockfile
 
 WORKDIR /opt/workbench
-COPY hypit-workbench/package.json hypit-workbench/pnpm-workspace.yaml ./
+COPY hypit-workbench/package.json hypit-workbench/pnpm-workspace.yaml hypit-workbench/pnpm-lock.yaml ./
 COPY hypit-workbench/server/package.json server/
 COPY hypit-workbench/web/package.json web/
-RUN pnpm install
+RUN pnpm install --frozen-lockfile
 COPY hypit-workbench/server/ server/
 COPY hypit-workbench/web/ web/
 RUN pnpm --filter @workbench/web build

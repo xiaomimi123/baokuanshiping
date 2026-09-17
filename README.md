@@ -16,6 +16,7 @@ hpyit爆款视频复刻/
     │   ├── entrypoint-runtime.sh   # runtime 服务：hypit runtime up，常驻
     │   ├── entrypoint-workbench.sh # workbench 服务：socat 转发 Studio + 起 Fastify 后端
     │   ├── runtime.docker.json     # 容器版 Runtime Profile 模板
+    │   ├── Dockerfile.dockerignore # 构建时忽略的文件（配合根 Dockerfile）
     │   └── smoke.sh                # 冒烟测试脚本
     ├── server/                 # 后端：Fastify + TypeScript（tsx 直跑，无需编译）
     │   └── src/routes/         # runtime / builds / profile / auth / studio 五组路由
@@ -70,8 +71,9 @@ pnpm dev:web      # 终端二：启动前端 dev server（Vite 代理到后端�
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `HYPIT_REPO` | `../../hypit`（相对 `server/`） | 上游 Hypit 源码根目录，后端据此定位 `bin/hypit.mjs` |
-| `HYPIT_PROJECT` | 同 `HYPIT_REPO` | Hypit 项目目录（`hypit.runtime.json`、Build 产物等所在目录） |
+| `HYPIT_PROJECT` | `<HYPIT_REPO 同级>/projects/default` | Hypit 项目目录（`hypit.runtime.json`、Build 产物等所在目录）；启动时若目录不存在会自动创建，默认值**从不指向上游仓库本身** |
 | `PORT` | `8090` | Workbench 后端 / 前端静态资源监听端口 |
+| `HOST` | `127.0.0.1` | Workbench 后端监听地址；仅在容器内（进程需要接受来自宿主机映射端口的连接）才应设为 `0.0.0.0`，本机直跑不要改 |
 | `STUDIO_PORT` | `5179` | 后端 spawn `hypit studio` 时使用的端口；Docker 中固定设为 `5180`，由 `socat` 转发到对外 `5179`（本机开发保持默认 `5179` 直连，无需转发） |
 
 Docker 中 `HYPIT_REPO=/opt/hypit`、`HYPIT_PROJECT=/projects/default` 已在 `docker/Dockerfile` 中写死，一般无需覆盖。
@@ -94,6 +96,7 @@ Hypit 官方发行版中，所有生成模型（Seedance、Seedream、GPT Image�
 - **Studio 经 socat 转发**：`hypit studio` 只能监听 `127.0.0.1`，无法直接对容器外暴露；`workbench` 服务用 `socat` 把内部 `5180` 转发到对外 `5179`，多一跳网络代理，属预期行为而非 bug。
 - **凭据 file store 为明文卷**：容器内没有 OS 级钥匙串，`@hypit/credential-store-file` 把 API Key 明文存放在 `hypit-home` 卷下的 `credentials/` 目录中，仅适合本机单人使用场景，不要把该卷同步到不受信任的位置。
 - **单人 / 无鉴权**：Compose 只绑定 `127.0.0.1`，不做多用户或登录鉴权，不要直接暴露到公网。
+- **前端能力范围收窄**：当前版本未实现 spec 中的三项前端能力——Build 产物画廊/内联预览、WhisperX 配置卡、Profile 保存前 diff 预览；后端产物下载接口（`GET /api/builds/:id/outputs/:name`）已就绪，留待后续迭代接入前端。
 
 ## 验证状态
 

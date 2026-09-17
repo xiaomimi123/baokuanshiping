@@ -1,6 +1,6 @@
 import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cfg } from "./config.js";
@@ -18,7 +18,8 @@ export function buildServer() {
       reply.status(502).send({ error: { code: error.code, message: error.message } });
     } else {
       app.log.error(error);
-      reply.status(500).send({ error: { code: "E_INTERNAL", message: error.message } });
+      const message = error instanceof Error ? error.message : String(error);
+      reply.status(500).send({ error: { code: "E_INTERNAL", message } });
     }
   });
   app.register(runtimeRoutes);
@@ -38,5 +39,6 @@ export function buildServer() {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  buildServer().listen({ port: cfg.port, host: "0.0.0.0" });
+  mkdirSync(cfg.project, { recursive: true });
+  buildServer().listen({ port: cfg.port, host: cfg.host });
 }

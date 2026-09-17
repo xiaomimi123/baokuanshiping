@@ -9,6 +9,7 @@
     "dev:web": "pnpm --filter @workbench/web dev",
     "build": "pnpm --filter @workbench/web build",
     "start": "pnpm --filter @workbench/server start",
-    "test": "pnpm --filter @workbench/server test"
+    "test": "pnpm --filter @workbench/server test",
+    "check": "pnpm --filter @workbench/server exec tsc --noEmit && pnpm --filter @workbench/web exec tsc --noEmit"
   }
 }

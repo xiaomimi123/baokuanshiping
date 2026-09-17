@@ -14,8 +14,10 @@ services:
     image: hypit-workbench:latest
     depends_on: [runtime]
     entrypoint: /usr/local/bin/entrypoint-workbench.sh
+    pid: "service:runtime"
     environment:
       - STUDIO_PORT=5180
+      - HOST=0.0.0.0
     volumes:
       - ../projects:/projects
       - hypit-home:/home/node

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { createReadStream } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runHypit } from "../hypit.js";
@@ -29,6 +29,13 @@ export async function buildsRoutes(app: FastifyInstance) {
     const target = join(dir, safeName);
     try {
       await runHypit(["get", req.params.id, "--output", req.params.name, "--to", target], { timeoutMs: 300_000 });
+      const st = await stat(target);
+      if (st.isDirectory()) {
+        await rm(dir, { recursive: true, force: true });
+        return reply.status(502).send({
+          error: { code: "E_COMPOSITE_OUTPUT", message: "该产物为复合目录，暂不支持网页下载，请用 hypit get 导出" },
+        });
+      }
     } catch (err) {
       await rm(dir, { recursive: true, force: true });
       throw err;
