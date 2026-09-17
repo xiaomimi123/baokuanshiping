@@ -19,18 +19,28 @@ export async function studioRoutes(app: FastifyInstance) {
   }));
   app.post<{ Body: { run: string } }>("/api/studio", async (req) => {
     if (running() && currentRun === req.body.run) return { running: true, url: `http://127.0.0.1:${port}`, run: currentRun };
-    if (running()) { child!.kill(); child = null; }
-    child = spawn(cfg.nodeBin, [join(cfg.hypitRepo, "bin/hypit.mjs"), "studio", "--run", req.body.run, "--port", port], {
+    if (running()) {
+      const old = child!;
+      old.on("exit", () => { if (child === old) child = null; });
+      old.kill();
+      child = null;
+    }
+    const next = spawn(cfg.nodeBin, [join(cfg.hypitRepo, "bin/hypit.mjs"), "studio", "--run", req.body.run, "--port", port], {
       cwd: cfg.project,
       stdio: ["ignore", "inherit", "inherit"],
     });
+    child = next;
     currentRun = req.body.run;
-    child.on("exit", () => { child = null; });
+    next.on("exit", () => { if (child === next) child = null; });
     await new Promise((r) => setTimeout(r, 2500));
     return { running: running(), url: `http://127.0.0.1:${port}`, run: currentRun };
   });
   app.delete("/api/studio", async () => {
-    if (running()) child!.kill();
+    if (running()) {
+      const old = child!;
+      old.on("exit", () => { if (child === old) child = null; });
+      old.kill();
+    }
     child = null;
     return { running: false };
   });

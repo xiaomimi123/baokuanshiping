@@ -5,6 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runHypit } from "../hypit.js";
 
+function sanitizeOutputName(name: string): string {
+  const replaced = name.replaceAll("/", "_");
+  return replaced === "." || replaced === ".." || replaced === "" ? "_" : replaced;
+}
+
 export async function buildsRoutes(app: FastifyInstance) {
   app.get<{ Querystring: { limit?: string; before?: string } }>("/api/builds", async (req) => {
     const args = ["builds"];
@@ -20,11 +25,24 @@ export async function buildsRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { id: string; name: string } }>("/api/builds/:id/outputs/:name", async (req, reply) => {
     const dir = await mkdtemp(join(tmpdir(), "wb-output-"));
-    const target = join(dir, req.params.name.replaceAll("/", "_"));
-    await runHypit(["get", req.params.id, "--output", req.params.name, "--to", target], { timeoutMs: 300_000 });
+    const safeName = sanitizeOutputName(req.params.name);
+    const target = join(dir, safeName);
+    try {
+      await runHypit(["get", req.params.id, "--output", req.params.name, "--to", target], { timeoutMs: 300_000 });
+    } catch (err) {
+      await rm(dir, { recursive: true, force: true });
+      throw err;
+    }
     reply.header("content-disposition", `attachment; filename="${encodeURIComponent(req.params.name)}"`);
     const stream = createReadStream(target);
-    stream.on("close", () => { void rm(dir, { recursive: true, force: true }); });
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      void rm(dir, { recursive: true, force: true });
+    };
+    stream.on("close", cleanup);
+    stream.on("error", cleanup);
     return reply.type("application/octet-stream").send(stream);
   });
 }
