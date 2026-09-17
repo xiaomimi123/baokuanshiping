@@ -27,7 +27,7 @@ export default function Builds() {
         setDetail(s.build);
         const l = await api<{ lines?: string[] }>(`/api/builds/${selected}/logs?lines=80`);
         if (!stop) setLogs(Array.isArray(l.lines) ? l.lines.join("\n") : JSON.stringify(l, null, 2));
-        if (s.build && s.build.work.state !== "done") setTimeout(tick, 3000);
+        if (!stop && s.build && s.build.work.state !== "done") setTimeout(tick, 3000);
       } catch (e) { if (!stop) setError((e as Error).message); }
     };
     void tick();
