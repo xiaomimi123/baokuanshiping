@@ -34,7 +34,7 @@ export default {
           modelMap[key] = resolveModelId(modelMapConfig[key], DEFAULT_MODEL_MAP[key]!);
         }
       }
-      if (!apiKey || !context.pool) throw new Error("gemini.images 需要 apiKey 凭据引用");
+      if (!apiKey || !context.pool) throw new Error(`${context.instance} 需要 apiKey 凭据引用`);
       return { endpoint: createGeminiImageProvider({
         instance: context.instance, pool: context.pool, baseUrl, apiKey, modelMap,
         concurrency: runtimeConfigPositiveInteger(config.defaultConcurrency, "defaultConcurrency") ?? 2,

@@ -60,6 +60,32 @@ describe("OpenAI 兼容图像 Provider", () => {
     expect(await resources.get(images[0]!.resource)).toEqual(PNG_BYTES);
   });
 
+  it("响应字节是 JPEG 时，mediaType 按 magic bytes 嗅探为 image/jpeg（不信任固定 image/png）", async () => {
+    const resources = new MemoryResourceStore();
+    const jpegBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
+    const b64Jpeg = Buffer.from(jpegBytes).toString("base64");
+    const provider = createOpenAiImageProvider({
+      instance: "openai.images", pool: "openai.images", baseUrl: "https://api.openai.com",
+      apiKey: { store: "file", key: "openai.images" }, wireModel: "gpt-image-1",
+      fetch: async () => Response.json({ data: [{ b64_json: b64Jpeg }] }),
+    });
+    const registry = new EndpointRegistry();
+    await provider.install(registry);
+    const request = need({ prompt: ["一只猫"], aspectRatio: ["1:1"] });
+    const resolution = registry.resolve(request);
+    if (resolution.status !== "resolved" || resolution.registration.kind !== "immediate") throw new Error("unreachable");
+    const context: EndpointInvocationContext = {
+      command: { kind: "fulfill-need", id: "command:jpeg", need: request },
+      need: request,
+      resources,
+      credentials: { apiKey: { secret: "test-key" } },
+    };
+    const result = await resolution.registration.handler(context);
+    const images = (result.value.value as unknown as { images: BlobRef[] }).images;
+    expect(images[0]?.mediaType).toBe("image/jpeg");
+    expect(await resources.get(images[0]!.resource)).toEqual(jpegBytes);
+  });
+
   it("有参考图时走 /v1/images/edits 的 multipart 请求，携带图片字节", async () => {
     const resources = new MemoryResourceStore();
     const source = await resources.put(new Uint8Array([1, 2, 3]), "image/png");

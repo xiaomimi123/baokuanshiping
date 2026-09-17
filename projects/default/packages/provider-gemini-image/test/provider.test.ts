@@ -167,6 +167,32 @@ describe("Gemini（Nano Banana）图像 Provider", () => {
     expect(imageConfig?.imageConfig?.imageSize).toBeUndefined();
   });
 
+  it("脱敏：HTTP 错误消息不含 API Key", async () => {
+    const resources = new MemoryResourceStore();
+    const provider = createGeminiImageProvider({
+      instance: "gemini.images", pool: "gemini.images", baseUrl: "https://generativelanguage.googleapis.com",
+      apiKey: { store: "file", key: "gemini.images" }, modelMap: DEFAULT_MODEL_MAP,
+      fetch: async () => Response.json({ error: { message: "API key not valid" } }, { status: 400 }),
+    });
+    const registry = new EndpointRegistry();
+    await provider.install(registry);
+    const request = need(capabilityNanoBanana2, { prompt: ["一只猫"], aspectRatio: ["1:1"] });
+    const resolution = registry.resolve(request);
+    if (resolution.status !== "resolved" || resolution.registration.kind !== "immediate") throw new Error("unreachable");
+    const context: EndpointInvocationContext = {
+      command: { kind: "fulfill-need", id: "command:fail", need: request },
+      need: request,
+      resources,
+      credentials: { apiKey: { secret: "test-key" } },
+    };
+    try {
+      await resolution.registration.handler(context);
+      throw new Error("expected handler to throw");
+    } catch (error) {
+      expect(String((error as Error).message)).not.toContain("test-key");
+    }
+  });
+
   it("activation：modelMap.nano-banana-2 为空字符串时不抛错，回落到默认模型 ID", async () => {
     const resources = new MemoryResourceStore();
     let seenUrl: string | undefined;

@@ -48,6 +48,11 @@ COPY hypit-workbench/docker/entrypoint-runtime.sh /usr/local/bin/entrypoint-runt
 COPY hypit-workbench/docker/entrypoint-workbench.sh /usr/local/bin/entrypoint-workbench.sh
 COPY hypit-workbench/docker/runtime.docker.json /opt/runtime.docker.json
 RUN chmod +x /usr/local/bin/*.sh && chown -R node:node /opt
+# I-1 修复引入的匿名卷挂载点：Docker 给匿名卷分配存储时按镜像内该路径已有的属主/权限初始化
+# 内容；这里预先建好目录并 chown 给 node，容器才能以非 root 的 node 用户在
+# /projects/default/node_modules 下建 symlink（否则匿名卷会以 root:root 初始化，
+# entrypoint 里的 mkdir -p 会 Permission denied）。
+RUN mkdir -p /projects/default/node_modules && chown -R node:node /projects
 
 USER node
 ENV HYPIT_REPO=/opt/hypit HYPIT_PROJECT=/projects/default

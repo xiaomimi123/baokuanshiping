@@ -135,6 +135,8 @@ Docker 中 `HYPIT_REPO=/opt/hypit`、`HYPIT_PROJECT=/projects/default` 已在 `d
 - **容器内改了 provider 源码要自己重新编译，entrypoint 不会自动重编译**：`docker/entrypoint-*.sh` 启动时只在 `/projects/default/packages/<pkg>` **缺失整个目录**或**缺失 `dist/`** 时，才从镜像内种子（`/opt/workbench-providers`）补一份源码+产物；如果你在容器里改了某个 provider 包的 `src/` 但没删/没建它自己的 `dist/`，entrypoint 不会重编也不会同步，跑的还是旧 `dist/`，源码和产物会悄悄不一致。改完源码后要自己重建：宿主机上 `pnpm providers:build`（`pnpm --filter '@workbench/provider-*' run build`），或容器内等效地对该包跑 `tsc -p tsconfig.json`。同理，如果手动删掉了某包的 `dist/` 想"重新触发种子同步"，补回来的也是**镜像构建时的旧版本 dist**，不是你改过的源码编译结果——想要新代码生效，必须自己跑一次 build，而不是依赖 entrypoint 的兜底同步。
 - **前端能力范围收窄**：当前版本未实现 spec 中的三项前端能力——Build 产物画廊/内联预览、WhisperX 配置卡、Profile 保存前 diff 预览；后端产物下载接口（`GET /api/builds/:id/outputs/:name`）已就绪，留待后续迭代接入前端。
 - **`docker compose restart` 会连带杀掉 workbench**：`workbench` 与 `runtime` 共享 PID 命名空间（`pid: "service:runtime"`），重启 runtime 容器会销毁该命名空间导致 workbench 以 137 退出。重启后用 `docker compose up -d` 把 workbench 拉回，或直接用 `docker compose down && docker compose up -d`。
+- **容器与宿主机各自维护 `@hypit` symlink**：`docker-compose.yml` 给两个服务的 `/projects/default/node_modules` 都加了匿名卷，让容器每次启动重建的 `@hypit/hypit`（指向镜像内 `/opt/hypit`）不会写穿到宿主机 bind mount、覆盖宿主机 `pnpm providers:setup` 建的 symlink（指向 `$HYPIT_REPO`）。代价是两边各自独立、互不同步：如果宿主机上直接跑 provider 包测试报找不到 `@hypit/hypit` 或 `@hypit/driver-node`，在仓库根目录跑一次 `pnpm providers:setup` 重建宿主机自己的 symlink 即可。
+- **方舟视频生成任务提交无幂等键**：`createVolcengineProvider` 的 `start()` 提交任务后若在 `requestTimeoutMs` 内没拿到响应（网络中断、超时等），本地会判定该次 `start` 失败并可能被上层重试；但方舟侧的任务可能已经创建成功并开始计费，重试会再次提交产生第二个任务。由于方舟"创建视频生成任务"接口未提供幂等键（如 `Idempotency-Key`）参数，直连 Provider 目前无法规避这种"远端已产生计费任务但本地未记录其 taskId、后续也不会被继续轮询"的重复提交风险。
 
 ## 验证状态
 

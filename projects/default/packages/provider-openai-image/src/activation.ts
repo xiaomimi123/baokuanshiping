@@ -14,7 +14,7 @@ export default {
       const baseUrl = runtimeConfigString(config.baseUrl, "baseUrl") ?? "https://api.openai.com";
       const apiKey = runtimeConfigCredentialRef(config.apiKey, "apiKey");
       const wireModel = runtimeConfigString(config.wireModel, "wireModel") ?? "gpt-image-1";
-      if (!apiKey || !context.pool) throw new Error("openai.images 需要 apiKey 凭据引用");
+      if (!apiKey || !context.pool) throw new Error(`${context.instance} 需要 apiKey 凭据引用`);
       return { endpoint: createOpenAiImageProvider({
         instance: context.instance, pool: context.pool, baseUrl, apiKey, wireModel,
         concurrency: runtimeConfigPositiveInteger(config.defaultConcurrency, "defaultConcurrency") ?? 2,

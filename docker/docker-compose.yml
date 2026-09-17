@@ -8,6 +8,13 @@ services:
     volumes:
       - ../projects:/projects
       - hypit-home:/home/node
+      # 容器每次启动都会在 /projects/default/node_modules/@hypit 下重建 symlink（见
+      # sync-providers.sh），而 ../projects 是宿主 bind mount——不加这条匿名卷的话，容器的
+      # symlink 会直接写穿到宿主机文件系统，和宿主机 `pnpm providers:setup` 建的 symlink 互相
+      # 覆盖/冲突（两边目标路径不同：容器内是 /opt/hypit，宿主机是 $HYPIT_REPO 的绝对路径）。
+      # 这条匿名卷让 node_modules 挂载点脱离 bind mount，容器与宿主机的 node_modules 链接从此
+      # 相互独立、各自维护，见 README「已知限制」。
+      - /projects/default/node_modules
     restart: unless-stopped
 
   workbench:
@@ -21,6 +28,9 @@ services:
     volumes:
       - ../projects:/projects
       - hypit-home:/home/node
+      # 与 runtime 服务同理：workbench 的 entrypoint 也跑 sync-providers.sh，需要同一条匿名卷
+      # 避免它的 symlink 写穿到宿主机 bind mount。
+      - /projects/default/node_modules
     ports:
       - "127.0.0.1:8090:8090"
       - "127.0.0.1:5179:5179"

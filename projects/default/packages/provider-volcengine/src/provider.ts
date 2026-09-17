@@ -49,8 +49,53 @@ const SEEDREAM_SUPPORTED_PORTS = new Set([
   "prompt", "aspectRatio", "quality", "outputFormat", "images", "nsfwCheck",
 ]);
 
-// basic/high/ultra 档位换算方舟 size 取值（brief §5：basic→1K、high→2K、ultra→4K）。
-const QUALITY_TO_SIZE: Readonly<Record<string, string>> = { basic: "1K", high: "2K", ultra: "4K" };
+// basic/high/ultra 档位换算方舟 size 取值：basic→2K、high→3K、ultra→4K（对齐上游 @hypit/seedream
+// 包 src/index.ts 的注释 "Basic renders 2K, high 3K and ultra 4K"）。方舟"图片生成"（Seedream 5.0
+// 系列）images/generations 接口的 size 字段既接受 2K/4K 这类档位字符串，也接受
+// "<width>x<height>" 像素字符串；官方文档给出的总像素合法区间是
+// [2560x1440=3,686,400, 4096x4096=16,777,216]，宽高比区间是 [1/16, 16]（详见任务报告 Seedream
+// size 文档核实结论）。为了不让非 1:1 的 aspectRatio 被方舟悄悄按方形处理或直接丢弃，这里统一用
+// 像素字符串：basic/high/ultra 分别以 2048²/3072²/4096² 为基准像素面积，再按 aspectRatio 精确换算
+// 成 "WxH"，四舍五入对齐到 16px 网格（对齐官方推荐分辨率表里出现的粒度，如 2304x1728、3024x1296
+// 均为 16 的整数倍）。basic 档的 2048² 基准换算结果始终高于官方最小像素区间，避免早前 "1K" 误档位
+// 低于该区间被方舟拒绝的问题。
+const QUALITY_TIER_BASE_PX: Readonly<Record<string, number>> = { basic: 2048, high: 3072, ultra: 4096 };
+
+function roundToGrid(px: number): number {
+  return Math.max(16, Math.round(px / 16) * 16);
+}
+
+function seedreamSize(quality: string, aspectRatio: string): string {
+  const base = QUALITY_TIER_BASE_PX[quality] ?? QUALITY_TIER_BASE_PX.basic!;
+  const [wRatioRaw, hRatioRaw] = aspectRatio.split(":");
+  const wRatio = Number(wRatioRaw);
+  const hRatio = Number(hRatioRaw);
+  if (!Number.isFinite(wRatio) || !Number.isFinite(hRatio) || wRatio <= 0 || hRatio <= 0) {
+    return `${base}x${base}`;
+  }
+  const area = base * base;
+  const width = roundToGrid(Math.sqrt(area * (wRatio / hRatio)));
+  const height = roundToGrid(Math.sqrt(area * (hRatio / wRatio)));
+  return `${width}x${height}`;
+}
+
+// 方舟图片响应总是 200 + JSON，实际字节的媒体类型不能信任请求里的 outputFormat 或
+// response_format——用 magic bytes 嗅探，落库 mediaType 与真实字节一致（I-5）。
+function sniffImageMediaType(bytes: Uint8Array): string {
+  if (bytes.length >= 4 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+    return "image/png";
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (
+    bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+    bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
+  ) {
+    return "image/webp";
+  }
+  return "image/png";
+}
 
 function redactSecrets(message: string): string {
   return message.replace(/https?:\/\/\S+/giu, "[redacted-url]");
@@ -292,7 +337,9 @@ export function createVolcengineProvider(options: CreateVolcengineProviderOption
     const prompt = ports.prompt?.[0];
     if (typeof prompt !== "string" || prompt.length === 0) throw new Error("方舟图像生成请求缺少 prompt");
     const quality = String(ports.quality?.[0] ?? "basic");
-    const size = QUALITY_TO_SIZE[quality] ?? QUALITY_TO_SIZE.basic;
+    const aspectRatio = String(ports.aspectRatio?.[0] ?? "1:1");
+    const size = seedreamSize(quality, aspectRatio);
+    const outputFormat = ports.outputFormat?.[0];
     const images = (ports.images ?? []) as readonly GenerationMediaValue[];
     const secret = await apiKeySecret(context);
 
@@ -307,6 +354,9 @@ export function createVolcengineProvider(options: CreateVolcengineProviderOption
 
     const body: Record<string, unknown> = {
       model, prompt, size, response_format: "b64_json", watermark: false,
+      // output_format 是方舟 doubao-seedream-5-0 系列独立于 response_format 的文件编码字段
+      // （png/jpeg），能映射就映射，不静默丢弃（I-4）。
+      ...(typeof outputFormat === "string" ? { output_format: outputFormat } : {}),
       ...(imageDataUrls.length > 0 ? { image: imageDataUrls } : {}),
     };
 
@@ -325,8 +375,8 @@ export function createVolcengineProvider(options: CreateVolcengineProviderOption
     const json = await response.json() as { data?: Array<{ b64_json?: unknown }> };
     const b64 = json.data?.[0]?.b64_json;
     if (typeof b64 !== "string" || b64.length === 0) throw new Error("方舟图像生成服务响应缺少 b64_json 字段");
-    const bytes = Buffer.from(b64, "base64");
-    const artifact = await context.resources.put(new Uint8Array(bytes), "image/png");
+    const bytes = new Uint8Array(Buffer.from(b64, "base64"));
+    const artifact = await context.resources.put(bytes, sniffImageMediaType(bytes));
     return { value: { kind: "inline" as const, value: canonicalize(sealGeneratedImageSet({ images: [artifact] })) } };
   }
 

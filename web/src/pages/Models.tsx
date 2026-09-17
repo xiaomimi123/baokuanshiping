@@ -154,7 +154,7 @@ export default function Models() {
   };
 
   const saveProviderCredential = async (instance: string) => {
-    const value = providerSecrets[instance];
+    const value = providerSecrets[instance]?.trim() ?? "";
     if (!value) return;
     setBusy(true); setError(""); setMsg("");
     try {
@@ -196,9 +196,11 @@ export default function Models() {
   };
 
   const login = async () => {
+    const value = secret.trim();
+    if (!value) return;
     setBusy(true); setError(""); setMsg("");
     try {
-      await api("/api/auth/hypihub.default", { method: "POST", body: JSON.stringify({ secret }) });
+      await api("/api/auth/hypihub.default", { method: "POST", body: JSON.stringify({ secret: value }) });
       setSecret(""); setMsg("HypiHub 凭据已保存"); await load();
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }

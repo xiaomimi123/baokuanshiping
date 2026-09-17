@@ -241,7 +241,7 @@ describe("火山引擎（Seedance/Seedream）Provider", () => {
     );
   });
 
-  it("Seedream immediate 全流程：请求体含 size/response_format/watermark，响应 b64_json 落库为 imageSet", async () => {
+  it("Seedream immediate 全流程（1:1）：请求体含 size/response_format/watermark，响应 b64_json 落库为 imageSet", async () => {
     const resources = new MemoryResourceStore();
     let seenUrl: string | undefined;
     let seenBody: Record<string, unknown> | undefined;
@@ -270,12 +270,160 @@ describe("火山引擎（Seedance/Seedream）Provider", () => {
     const result = await resolution.registration.handler(context);
     expect(seenUrl).toBe("https://ark.cn-beijing.volces.com/api/v3/images/generations");
     expect(seenBody?.model).toBe("doubao-seedream-5-0-lite-260128");
-    expect(seenBody?.size).toBe("2K");
+    // high 档位对应 3072² 基准像素面积，1:1 时 width=height=3072。
+    expect(seenBody?.size).toBe("3072x3072");
     expect(seenBody?.response_format).toBe("b64_json");
     expect(seenBody?.watermark).toBe(false);
     expect(result.value.kind).toBe("inline");
     const images = (result.value.value as unknown as { images: BlobRef[] }).images;
     expect(images).toHaveLength(1);
+    expect(images[0]?.mediaType).toBe("image/png");
     expect(await resources.get(images[0]!.resource)).toEqual(PNG_BYTES);
+  });
+
+  it("Seedream 档位映射：basic→2048x2048、high→3072x3072、ultra→4096x4096（1:1 时）", async () => {
+    const sizesSeen: Record<string, unknown> = {};
+    for (const quality of ["basic", "high", "ultra"] as const) {
+      const resources = new MemoryResourceStore();
+      const provider = createVolcengineProvider({
+        instance: "volcengine.default", pool: "volcengine.default",
+        baseUrl: "https://ark.cn-beijing.volces.com",
+        apiKey: { store: "file", key: "volcengine.ark" }, modelMap: MODEL_MAP,
+        fetch: async (_input, init) => {
+          sizesSeen[quality] = (JSON.parse(String(init?.body)) as { size: unknown }).size;
+          return Response.json({ data: [{ b64_json: PNG_B64 }] });
+        },
+      });
+      const registry = new EndpointRegistry();
+      await provider.install(registry);
+      const request = need(capabilitySeedream5Lite, generationTypes.imageSet, {
+        prompt: ["一只猫"], quality: [quality],
+      });
+      const resolution = registry.resolve(request);
+      if (resolution.status !== "resolved" || resolution.registration.kind !== "immediate") throw new Error("unreachable");
+      const context: EndpointInvocationContext = {
+        command: { kind: "fulfill-need", id: `command:${quality}`, need: request },
+        need: request, resources, credentials: { apiKey: { secret: "test-key" } },
+      };
+      await resolution.registration.handler(context);
+    }
+    expect(sizesSeen).toEqual({ basic: "2048x2048", high: "3072x3072", ultra: "4096x4096" });
+  });
+
+  it("Seedream 非 1:1 宽高比：请求体 size 按 aspectRatio 精确换算像素（不静默丢弃 aspectRatio），outputFormat 映射到 output_format", async () => {
+    const resources = new MemoryResourceStore();
+    let seenBody: Record<string, unknown> | undefined;
+    const provider = createVolcengineProvider({
+      instance: "volcengine.default", pool: "volcengine.default",
+      baseUrl: "https://ark.cn-beijing.volces.com",
+      apiKey: { store: "file", key: "volcengine.ark" }, modelMap: MODEL_MAP,
+      fetch: async (_input, init) => {
+        seenBody = JSON.parse(String(init?.body));
+        return Response.json({ data: [{ b64_json: PNG_B64 }] });
+      },
+    });
+    const registry = new EndpointRegistry();
+    await provider.install(registry);
+    const request = need(capabilitySeedream5Lite, generationTypes.imageSet, {
+      prompt: ["一只猫在窗台上"], quality: ["basic"], aspectRatio: ["16:9"], outputFormat: ["jpeg"],
+    });
+    const resolution = registry.resolve(request);
+    if (resolution.status !== "resolved" || resolution.registration.kind !== "immediate") throw new Error("unreachable");
+    const context: EndpointInvocationContext = {
+      command: { kind: "fulfill-need", id: "command:ratio", need: request },
+      need: request, resources, credentials: { apiKey: { secret: "test-key" } },
+    };
+    await resolution.registration.handler(context);
+    // basic 档基准面积 2048²=4,194,304；16:9 换算并对齐 16px 网格。
+    expect(seenBody?.size).toBe("2736x1536");
+    expect(seenBody?.output_format).toBe("jpeg");
+  });
+
+  it("Seedream 响应字节是 JPEG 时，mediaType 按 magic bytes 嗅探为 image/jpeg（不信任固定 image/png）", async () => {
+    const resources = new MemoryResourceStore();
+    const jpegBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 9, 9]);
+    const b64Jpeg = Buffer.from(jpegBytes).toString("base64");
+    const provider = createVolcengineProvider({
+      instance: "volcengine.default", pool: "volcengine.default",
+      baseUrl: "https://ark.cn-beijing.volces.com",
+      apiKey: { store: "file", key: "volcengine.ark" }, modelMap: MODEL_MAP,
+      fetch: async () => Response.json({ data: [{ b64_json: b64Jpeg }] }),
+    });
+    const registry = new EndpointRegistry();
+    await provider.install(registry);
+    const request = need(capabilitySeedream5Lite, generationTypes.imageSet, { prompt: ["一只猫"] });
+    const resolution = registry.resolve(request);
+    if (resolution.status !== "resolved" || resolution.registration.kind !== "immediate") throw new Error("unreachable");
+    const context: EndpointInvocationContext = {
+      command: { kind: "fulfill-need", id: "command:jpeg", need: request },
+      need: request, resources, credentials: { apiKey: { secret: "test-key" } },
+    };
+    const result = await resolution.registration.handler(context);
+    const images = (result.value.value as unknown as { images: BlobRef[] }).images;
+    expect(images[0]?.mediaType).toBe("image/jpeg");
+    expect(await resources.get(images[0]!.resource)).toEqual(jpegBytes);
+  });
+
+  it("脱敏：HTTP 错误消息不含 API Key", async () => {
+    const resources = new MemoryResourceStore();
+    const provider = createVolcengineProvider({
+      instance: "volcengine.default", pool: "volcengine.default",
+      baseUrl: "https://ark.cn-beijing.volces.com",
+      apiKey: { store: "file", key: "volcengine.ark" }, modelMap: MODEL_MAP,
+      fetch: async () => Response.json({ error: { message: "invalid api key" } }, { status: 401 }),
+    });
+    const registry = new EndpointRegistry();
+    await provider.install(registry);
+    const request = need(capabilitySeedream5Lite, generationTypes.imageSet, { prompt: ["一只猫"] });
+    const resolution = registry.resolve(request);
+    if (resolution.status !== "resolved" || resolution.registration.kind !== "immediate") throw new Error("unreachable");
+    const context: EndpointInvocationContext = {
+      command: { kind: "fulfill-need", id: "command:fail", need: request },
+      need: request, resources, credentials: { apiKey: { secret: "test-key" } },
+    };
+    try {
+      await resolution.registration.handler(context);
+      throw new Error("expected handler to throw");
+    } catch (error) {
+      expect(String((error as Error).message)).not.toContain("test-key");
+    }
+  });
+
+  it("脱敏：视频下载失败时签名 URL 被 [redacted-url] 替换", async () => {
+    const resources = new MemoryResourceStore();
+    const provider = createVolcengineProvider({
+      instance: "volcengine.default", pool: "volcengine.default",
+      baseUrl: "https://ark.cn-beijing.volces.com",
+      apiKey: { store: "file", key: "volcengine.ark" }, modelMap: MODEL_MAP,
+      fetch: async (input) => {
+        const url = String(input);
+        // 模拟底层网络异常（如 undici 的 fetch failed），错误消息里直接带出请求的签名 URL——
+        // 这是签名 URL 真正可能泄漏到日志/错误信息里的路径，而非 HTTP 状态码文案。
+        if (url.includes("tos-cn-beijing.volces.com")) throw new Error(`request to ${url} failed, reason: connect ETIMEDOUT`);
+        return Response.json({
+          id: "cgt-test-005", status: "succeeded",
+          content: { video_url: "https://ark-content-generation-cn-beijing.tos-cn-beijing.volces.com/signed?token=test-key-secret" },
+        });
+      },
+    });
+    const registry = new EndpointRegistry();
+    await provider.install(registry);
+    const request = need(capabilitySeedance2, generationTypes.videoSet, { prompt: ["一只猫"] });
+    const resolution = registry.resolve(request);
+    if (resolution.status !== "resolved" || resolution.registration.kind !== "asynchronous") throw new Error("unreachable");
+    const handle = canonicalize({
+      contract: "workbench.volcengine-task@1", taskId: "cgt-test-005",
+      capability: "seedance-2", startedAt: Date.now(),
+    });
+    const context: EndpointPollContext = {
+      command: { kind: "fulfill-need", id: "command:test", need: request },
+      need: request, resources, credentials: { apiKey: { secret: "test-key" } },
+      operation: "op:test", handle,
+    };
+    const outcome = await resolution.registration.endpoint.collect!(context);
+    expect(outcome.status).toBe("failed");
+    if (outcome.status !== "failed") throw new Error("unreachable");
+    expect(outcome.failure.message).not.toContain("token=test-key-secret");
+    expect(outcome.failure.message).toContain("[redacted-url]");
   });
 });

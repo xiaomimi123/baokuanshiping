@@ -22,7 +22,7 @@ export default {
       const config = runtimeConfigObject(context.config, "Volcengine Ark service");
       runtimeConfigExact(
         config,
-        ["baseUrl", "apiKey", "modelMap", "defaultConcurrency", "pollIntervalMs", "requestTimeoutMs"],
+        ["baseUrl", "apiKey", "modelMap", "defaultConcurrency", "pollIntervalMs", "requestTimeoutMs", "maxOperationMs"],
         "Volcengine Ark service",
       );
       const baseUrl = runtimeConfigString(config.baseUrl, "baseUrl") ?? "https://ark.cn-beijing.volces.com";
@@ -32,13 +32,14 @@ export default {
       for (const key of MODEL_MAP_KEYS) {
         modelMap[key] = resolveModelId(modelMapConfig?.[key]);
       }
-      if (!apiKey || !context.pool) throw new Error("volcengine.default 需要 apiKey 凭据引用");
+      if (!apiKey || !context.pool) throw new Error(`${context.instance} 需要 apiKey 凭据引用`);
       return {
         endpoint: createVolcengineProvider({
           instance: context.instance, pool: context.pool, baseUrl, apiKey, modelMap,
           concurrency: runtimeConfigPositiveInteger(config.defaultConcurrency, "defaultConcurrency") ?? 2,
           pollIntervalMs: runtimeConfigPositiveInteger(config.pollIntervalMs, "pollIntervalMs") ?? 8_000,
           requestTimeoutMs: runtimeConfigPositiveInteger(config.requestTimeoutMs, "requestTimeoutMs") ?? 120_000,
+          maxOperationMs: runtimeConfigPositiveInteger(config.maxOperationMs, "maxOperationMs") ?? 20 * 60_000,
         }),
       };
     },

@@ -20,6 +20,24 @@ function redactUrls(message: string): string {
   return message.replace(/https?:\/\/\S+/giu, "[redacted-url]");
 }
 
+// OpenAI 兼容服务返回的 b64_json 实际编码可能与请求无关（服务方决定），不能硬编码
+// mediaType——用 magic bytes 嗅探真实字节，落库 mediaType 与真实字节一致（I-5）。
+function sniffImageMediaType(bytes: Uint8Array): string {
+  if (bytes.length >= 4 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+    return "image/png";
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (
+    bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+    bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
+  ) {
+    return "image/webp";
+  }
+  return "image/png";
+}
+
 function requestPorts(request: EndpointRequest): Readonly<Record<string, readonly unknown[]>> {
   return (request.constraints as unknown as GenerationRequest).ports;
 }
@@ -116,8 +134,8 @@ export function createOpenAiImageProvider(options: CreateOpenAiImageProviderOpti
     const body = await response.json() as { data?: Array<{ b64_json?: unknown }> };
     const b64 = body.data?.[0]?.b64_json;
     if (typeof b64 !== "string" || b64.length === 0) throw new Error("OpenAI 图像服务响应缺少 b64_json 字段");
-    const bytes = Buffer.from(b64, "base64");
-    const artifact = await context.resources.put(new Uint8Array(bytes), "image/png");
+    const bytes = new Uint8Array(Buffer.from(b64, "base64"));
+    const artifact = await context.resources.put(bytes, sniffImageMediaType(bytes));
     return { value: { kind: "inline" as const, value: canonicalize(sealGeneratedImageSet({ images: [artifact] })) } };
   }
 
