@@ -80,13 +80,20 @@ Docker 中 `HYPIT_REPO=/opt/hypit`、`HYPIT_PROJECT=/projects/default` 已在 `d
 
 ## 模型与服务配置
 
-Hypit 官方发行版中，所有生成模型（Seedance、Seedream、GPT Image、Nano Banana、Grok Imagine、MiniMax、ElevenLabs/FishAudio 语音、WhisperX 云端转写等）统一经由 `@hypit/provider-hypihub` 网关调用，不做任何厂商直连。
+**默认配置不接入任何生成模型服务**（纯本地：HyperFrames 渲染 + 本地媒体处理）。纯字幕 / 动效 / 代码渲染的视频不需要模型服务，开箱即用。
 
-首次使用需要：
+需要 AI 生图 / 生视频 / 语音合成时，有两条路：
 
-1. 打开工作台「模型与服务」页面
-2. 填入 HypiHub 的 API Key（保存后走 `hypit auth login` 非交互登录，凭据以文件形式存放在容器内 `credentials/` 目录，随 `hypit-home` 卷持久化）
-3. 可按需调整并发数、每模型能力并发
+1. **HypiHub 托管网关（上游官方方案）**：Hypit 官方发行版中，所有生成模型（Seedance、Seedream、GPT Image、Nano Banana、Grok Imagine、MiniMax、ElevenLabs/FishAudio 语音、WhisperX 云端转写等）统一经由 `@hypit/provider-hypihub` 调用。启用方法：在 Runtime Profile（`/projects/default/hypit.runtime.json`）的 `endpoints` 中加回：
+
+   ```json
+   "credentials": { "file": { "use": "@hypit/credential-store-file", "config": { "path": "credentials" } } },
+   "endpoints": { "hypihub.default": { "use": "@hypit/provider-hypihub",
+     "config": { "baseUrl": "https://hypit.ai", "apiKey": { "store": "file", "key": "hypihub.oauth" }, "defaultConcurrency": 3 } }, ... }
+   ```
+
+   然后在工作台「模型与服务」页填入 API Key（凭据以文件形式存放在容器内 `credentials/` 目录，随 `hypit-home` 卷持久化），可按需调整总并发与每模型能力并发。
+2. **自建直连 Provider（用你自己的各厂商 API Key）**：参考上游 `docs/guide/providers.md` 与 `examples/provider-package/`，为目标厂商实现 Provider 包后加入 `endpoints` 并用 `bindings` 绑定能力。
 
 本地渲染（HyperFrames）与本地媒体处理不需要额外配置，容器内已固定使用 `chromium-nosandbox` 包装脚本 + 软件渲染（`browserGpu: "software"`）。
 
@@ -97,6 +104,7 @@ Hypit 官方发行版中，所有生成模型（Seedance、Seedream、GPT Image�
 - **凭据 file store 为明文卷**：容器内没有 OS 级钥匙串，`@hypit/credential-store-file` 把 API Key 明文存放在 `hypit-home` 卷下的 `credentials/` 目录中，仅适合本机单人使用场景，不要把该卷同步到不受信任的位置。
 - **单人 / 无鉴权**：Compose 只绑定 `127.0.0.1`，不做多用户或登录鉴权，不要直接暴露到公网。
 - **前端能力范围收窄**：当前版本未实现 spec 中的三项前端能力——Build 产物画廊/内联预览、WhisperX 配置卡、Profile 保存前 diff 预览；后端产物下载接口（`GET /api/builds/:id/outputs/:name`）已就绪，留待后续迭代接入前端。
+- **`docker compose restart` 会连带杀掉 workbench**：`workbench` 与 `runtime` 共享 PID 命名空间（`pid: "service:runtime"`），重启 runtime 容器会销毁该命名空间导致 workbench 以 137 退出。重启后用 `docker compose up -d` 把 workbench 拉回，或直接用 `docker compose down && docker compose up -d`。
 
 ## 验证状态
 
@@ -104,6 +112,6 @@ Hypit 官方发行版中，所有生成模型（Seedance、Seedream、GPT Image�
 
 - `docker compose build && docker compose up -d` 已在 Apple Silicon + Docker Desktop（linux/arm64 容器）上实际构建并启动成功。
 - `docker/smoke.sh` 对 `/api/health`、`/api/runtime/status`、`/api/doctor`、`/api/builds`、`/api/profile`、`/api/studio` 六个接口的探测已跑通。
-- `hypit doctor --json` 中浏览器诊断项已确认走 `chromium-nosandbox` 路径；HypiHub 未登录导致的 error 属预期（在「模型与服务」页填入 Key 后消失）。
+- `hypit doctor --json` 中浏览器诊断项已确认走 `chromium-nosandbox` 路径；默认纯本地配置下 doctor `ok:true` 无 error。
 
 如果你在其他环境（不同 CPU 架构、Docker 版本）上遇到构建失败，最常见原因是 apt 源瞬时 502（重试即可）或 `docker/docker-compose.yml` 中 `context` 路径与你的目录布局不一致——本仓库要求 `hypit-workbench` 与 `hypit` 是同级目录。

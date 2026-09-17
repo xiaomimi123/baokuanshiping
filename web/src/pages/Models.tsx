@@ -19,8 +19,13 @@ export default function Models() {
   const load = useCallback(async () => {
     try {
       setError("");
-      setEnv(await api<ProfileEnvelope>("/api/profile"));
-      setAuth(await api<AuthStatus>("/api/auth/hypihub.default"));
+      const nextEnv = await api<ProfileEnvelope>("/api/profile");
+      setEnv(nextEnv);
+      if (nextEnv.profile.endpoints?.["hypihub.default"]) {
+        setAuth(await api<AuthStatus>("/api/auth/hypihub.default"));
+      } else {
+        setAuth(null);
+      }
     } catch (e) { setError((e as Error).message); }
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -85,10 +90,17 @@ export default function Models() {
   return (
     <>
       <h1>模型与服务</h1>
-      <p className="sub">所有生成模型经 HypiHub 网关执行；本地渲染与转写在本机运行。保存写回 {env?.path ?? "…"}</p>
+      <p className="sub">本地渲染与媒体处理在本机运行；生成模型服务按需接入。保存写回 {env?.path ?? "…"}</p>
       {error && <div className="error-box">{error}</div>}
       {msg && <div className="card" style={{ marginBottom: 16 }}>{msg}</div>}
       <div className="grid">
+        {!hub && env && (
+          <div className="card" style={{ gridColumn: "1 / -1" }}>
+            <h3>生成模型服务</h3>
+            <p className="desc">当前未接入任何生成模型服务（HypiHub 已停用）。纯字幕 / 动效 / 代码渲染的视频不需要模型服务；需要 AI 生图 / 生视频时，可接入 HypiHub 或自建直连 Provider（见 README）。</p>
+          </div>
+        )}
+        {hub && (
         <div className="card" style={{ gridColumn: "1 / -1" }}>
           <div className="row">
             <h3>HypiHub 网关</h3>
@@ -126,6 +138,7 @@ export default function Models() {
             </div>
           ))}
         </div>
+        )}
         <div className="card">
           <div className="row">
             <h3>本地渲染</h3>
