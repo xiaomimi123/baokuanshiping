@@ -1,7 +1,7 @@
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
-    headers: { "content-type": "application/json" },
     ...init,
+    headers: init?.body != null ? { "content-type": "application/json" } : undefined,
   });
   if (!res.ok) {
     let message = `${res.status}`;
