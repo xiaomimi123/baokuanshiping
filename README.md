@@ -20,8 +20,11 @@ hpyit爆款视频复刻/
     │   └── smoke.sh                # 冒烟测试脚本
     ├── server/                 # 后端：Fastify + TypeScript（tsx 直跑，无需编译）
     │   └── src/routes/         # runtime / builds / profile / auth / studio 五组路由
-    └── web/                    # 前端：Vite + React + TypeScript
-        └── src/pages/          # 总览 / 模型与服务 / 任务 / Studio 四个页面
+    ├── web/                    # 前端：Vite + React + TypeScript
+    │   └── src/pages/          # 总览 / 模型与服务 / 任务 / Studio 四个页面
+    └── projects/default/       # Hypit 项目本地包（git 跟踪源码，dist/ 不跟踪）
+        └── packages/
+            └── provider-openai-image/   # 直连 OpenAI 兼容生图 Provider（骨架，逻辑见 Task 2）
 ```
 
 Docker Compose 两个服务共享同一镜像：
@@ -61,10 +64,14 @@ cd docker && bash smoke.sh
 
 ```bash
 nvm use 22
+pnpm providers:setup   # 建 projects/default/node_modules/@hypit/hypit -> ../hypit 的 symlink（默认取 ../../hypit，可用 HYPIT_REPO 覆盖）
 pnpm install
+pnpm providers:build   # 编译 projects/default/packages/ 下的自建 Provider 包
 pnpm dev:server   # 终端一：启动后端 http://127.0.0.1:8090
 pnpm dev:web      # 终端二：启动前端 dev server（Vite 代理到后端）
 ```
+
+`pnpm providers:setup`/`pnpm providers:build` 只在使用「自建直连 Provider」时需要（见下文「模型与服务配置」）；纯本地渲染场景可跳过。
 
 ## 环境变量
 
@@ -93,7 +100,7 @@ Docker 中 `HYPIT_REPO=/opt/hypit`、`HYPIT_PROJECT=/projects/default` 已在 `d
    ```
 
    然后在工作台「模型与服务」页填入 API Key（凭据以文件形式存放在容器内 `credentials/` 目录，随 `hypit-home` 卷持久化），可按需调整总并发与每模型能力并发。
-2. **自建直连 Provider（用你自己的各厂商 API Key）**：参考上游 `docs/guide/providers.md` 与 `examples/provider-package/`，为目标厂商实现 Provider 包后加入 `endpoints` 并用 `bindings` 绑定能力。
+2. **自建直连 Provider（用你自己的各厂商 API Key，开发中）**：源码放在 `projects/default/packages/`（git 跟踪，`dist/` 不跟踪），按 `docs/superpowers/specs/2026-09-17-direct-providers-design.md` 实现，参考上游 `examples/provider-package/`。当前已接入 `provider-openai-image` 骨架（`openai.images` endpoint，绑定 `@hypit/gpt-image@1#gpt-image-2`）；`handler` 尚未实现真实调用逻辑。开发前先 `pnpm providers:setup && pnpm providers:build`。
 
 本地渲染（HyperFrames）与本地媒体处理不需要额外配置，容器内已固定使用 `chromium-nosandbox` 包装脚本 + 软件渲染（`browserGpu: "software"`）。
 

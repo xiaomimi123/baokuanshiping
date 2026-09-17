@@ -10,6 +10,8 @@
     "build": "pnpm --filter @workbench/web build",
     "start": "pnpm --filter @workbench/server start",
     "test": "pnpm --filter @workbench/server test",
-    "check": "pnpm --filter @workbench/server exec tsc --noEmit && pnpm --filter @workbench/web exec tsc --noEmit"
+    "check": "pnpm --filter @workbench/server exec tsc --noEmit && pnpm --filter @workbench/web exec tsc --noEmit",
+    "providers:setup": "bash scripts/setup-providers.sh",
+    "providers:build": "pnpm --filter '@workbench/provider-*' run build"
   }
 }

@@ -3,4 +3,10 @@ dist/
 *.log
 .DS_Store
 .superpowers/
-/projects/
+/projects/*
+!/projects/default/
+/projects/default/*
+!/projects/default/package.json
+!/projects/default/packages/
+projects/default/packages/*/dist/
+projects/default/packages/*/node_modules/
