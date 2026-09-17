@@ -107,7 +107,7 @@ Docker 中 `HYPIT_REPO=/opt/hypit`、`HYPIT_PROJECT=/projects/default` 已在 `d
    - `provider-gemini-image`（`gemini.images` endpoint，绑定 `@hypit/nano-banana@1#nano-banana-2` / `#nano-banana-pro`，immediate）；
    - `provider-volcengine`（`volcengine.default` endpoint，绑定 `@hypit/seedance@1` 的 4 个能力（asynchronous，方舟异步任务：提交 → 轮询 → 下载视频）+ `@hypit/seedream@1#seedream-5-lite`（immediate））。
 
-   三者的 `apiKey`（以及火山引擎的 `modelMap`）均需在 Runtime Profile 中配置后才能实际出片；`modelMap` 留空的能力会在调用时报中文错误，提示到对应厂商控制台确认模型 ID。开发前先 `pnpm providers:setup && pnpm providers:build`。
+   三者的 `apiKey`（以及火山引擎的 `modelMap`）均需配置后才能实际出片；`modelMap` 留空的能力会在调用时报中文错误，提示到对应厂商控制台确认模型 ID。可直接手改 Runtime Profile，也可在工作台「模型与服务」页操作：三张厂商卡按需「启用」（一键写入默认配置块 + 绑定），随后填 API Key（保存后不回显）、baseUrl、模型 ID，「测试」按钮调用 `doctor` 校验连通性。开发前先 `pnpm providers:setup && pnpm providers:build`。
 
 本地渲染（HyperFrames）与本地媒体处理不需要额外配置，容器内已固定使用 `chromium-nosandbox` 包装脚本 + 软件渲染（`browserGpu: "software"`）。
 

@@ -8,10 +8,86 @@ const CAPABILITIES = [
   ["转写", ["transcription"]],
 ] as const;
 
+type ProviderDef = {
+  instance: string;
+  use: string;
+  title: string;
+  desc: string;
+  credLabel: string;
+  models: [string, string][];
+  modelField: "modelMap" | "wireModel";
+  defaults: Record<string, unknown>;
+  bindings: Record<string, string>;
+};
+
+const PROVIDERS: ProviderDef[] = [
+  {
+    instance: "volcengine.default", use: "@workbench/provider-volcengine", title: "火山引擎（方舟）",
+    desc: "Seedance 生视频 ×4 · Seedream 生图", credLabel: "方舟 API Key",
+    models: [
+      ["seedance-2", "Seedance 2.0"],
+      ["seedance-2-fast", "Seedance 2.0 Fast"],
+      ["seedance-2-mini", "Seedance 2.0 Mini"],
+      ["seedance-2.5", "Seedance 2.5"],
+      ["seedream-5-lite", "Seedream 5 Lite"],
+    ],
+    modelField: "modelMap",
+    defaults: {
+      baseUrl: "https://ark.cn-beijing.volces.com",
+      apiKey: { store: "file", key: "volcengine.ark" },
+      modelMap: {
+        "seedance-2": "", "seedance-2-fast": "", "seedance-2-mini": "", "seedance-2.5": "",
+        "seedream-5-lite": "",
+      },
+      defaultConcurrency: 2, pollIntervalMs: 8000, requestTimeoutMs: 120000,
+    },
+    bindings: {
+      "@hypit/seedance@1#seedance-2": "volcengine.default",
+      "@hypit/seedance@1#seedance-2-fast": "volcengine.default",
+      "@hypit/seedance@1#seedance-2-mini": "volcengine.default",
+      "@hypit/seedance@1#seedance-2.5": "volcengine.default",
+      "@hypit/seedream@1#seedream-5-lite": "volcengine.default",
+    },
+  },
+  {
+    instance: "openai.images", use: "@workbench/provider-openai-image", title: "OpenAI 兼容",
+    desc: "GPT Image 生图 · baseUrl 可改为任意中转站", credLabel: "API Key",
+    models: [["wireModel", "线上模型 ID"]], modelField: "wireModel",
+    defaults: {
+      baseUrl: "https://api.openai.com",
+      apiKey: { store: "file", key: "openai.images" },
+      wireModel: "gpt-image-1",
+      defaultConcurrency: 2, requestTimeoutMs: 180000,
+    },
+    bindings: { "@hypit/gpt-image@1#gpt-image-2": "openai.images" },
+  },
+  {
+    instance: "gemini.images", use: "@workbench/provider-gemini-image", title: "Google Gemini",
+    desc: "Nano Banana 生图/改图", credLabel: "Gemini API Key",
+    models: [
+      ["nano-banana-2", "Nano Banana 2"],
+      ["nano-banana-pro", "Nano Banana Pro"],
+    ],
+    modelField: "modelMap",
+    defaults: {
+      baseUrl: "https://generativelanguage.googleapis.com",
+      apiKey: { store: "file", key: "gemini.images" },
+      modelMap: { "nano-banana-2": "gemini-2.5-flash-image", "nano-banana-pro": "gemini-3-pro-image-preview" },
+      defaultConcurrency: 2, requestTimeoutMs: 180000,
+    },
+    bindings: {
+      "@hypit/nano-banana@1#nano-banana-2": "gemini.images",
+      "@hypit/nano-banana@1#nano-banana-pro": "gemini.images",
+    },
+  },
+];
+
 export default function Models() {
   const [env, setEnv] = useState<ProfileEnvelope | null>(null);
   const [auth, setAuth] = useState<AuthStatus | null>(null);
+  const [providerAuth, setProviderAuth] = useState<Record<string, AuthStatus | null>>({});
   const [secret, setSecret] = useState("");
+  const [providerSecrets, setProviderSecrets] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -26,6 +102,16 @@ export default function Models() {
       } else {
         setAuth(null);
       }
+      const present = PROVIDERS.filter((p) => nextEnv.profile.endpoints?.[p.instance]);
+      const results = await Promise.allSettled(
+        present.map((p) => api<AuthStatus>(`/api/auth/${encodeURIComponent(p.instance)}`)),
+      );
+      const nextProviderAuth: Record<string, AuthStatus | null> = {};
+      present.forEach((p, i) => {
+        const r = results[i];
+        nextProviderAuth[p.instance] = r.status === "fulfilled" ? r.value : null;
+      });
+      setProviderAuth(nextProviderAuth);
     } catch (e) { setError((e as Error).message); }
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -54,6 +140,49 @@ export default function Models() {
     ep.config = { ...(ep.config ?? {}), capabilityConcurrency: cc };
     if (Object.keys(cc).length === 0) delete (ep.config as Record<string, unknown>).capabilityConcurrency;
     setEnv({ ...env, profile: next });
+  };
+
+  const patchNested = (endpoint: string, field: string, subKey: string, value: string) => {
+    if (!env) return;
+    const next = structuredClone(env.profile) as RuntimeProfile;
+    const ep = next.endpoints?.[endpoint];
+    if (!ep) return;
+    const obj = { ...((ep.config?.[field] as Record<string, unknown>) ?? {}) };
+    obj[subKey] = value;
+    ep.config = { ...(ep.config ?? {}), [field]: obj };
+    setEnv({ ...env, profile: next });
+  };
+
+  const saveProviderCredential = async (instance: string) => {
+    const value = providerSecrets[instance];
+    if (!value) return;
+    setBusy(true); setError(""); setMsg("");
+    try {
+      await api(`/api/auth/${encodeURIComponent(instance)}`, { method: "POST", body: JSON.stringify({ secret: value }) });
+      setProviderSecrets((s) => ({ ...s, [instance]: "" }));
+      setMsg(`${instance} 凭据已保存`);
+      await load();
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const enableProvider = async (p: ProviderDef) => {
+    if (!env) return;
+    setBusy(true); setError(""); setMsg("");
+    try {
+      const next = structuredClone(env.profile) as RuntimeProfile;
+      next.endpoints = { ...(next.endpoints ?? {}) };
+      next.endpoints[p.instance] = { use: p.use, config: structuredClone(p.defaults) as Record<string, unknown> };
+      next.bindings = { ...(next.bindings ?? {}), ...p.bindings };
+      next.credentials = { ...(next.credentials ?? {}) };
+      if (!next.credentials.file) {
+        next.credentials.file = { use: "@hypit/credential-store-file", config: { path: "credentials" } };
+      }
+      await api("/api/profile", { method: "PUT", body: JSON.stringify({ profile: next }) });
+      setMsg(`${p.title} 已启用并保存`);
+      await load();
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
   };
 
   const save = async () => {
@@ -90,16 +219,86 @@ export default function Models() {
   return (
     <>
       <h1>模型与服务</h1>
-      <p className="sub">本地渲染与媒体处理在本机运行；生成模型服务按需接入。保存写回 {env?.path ?? "…"}</p>
+      <p className="sub">本地渲染与媒体处理在本机运行；生成模型服务按需接入 HypiHub 网关或以下直连厂商。保存写回 {env?.path ?? "…"}</p>
       {error && <div className="error-box">{error}</div>}
       {msg && <div className="card" style={{ marginBottom: 16 }}>{msg}</div>}
       <div className="grid">
-        {!hub && env && (
-          <div className="card" style={{ gridColumn: "1 / -1" }}>
-            <h3>生成模型服务</h3>
-            <p className="desc">当前未接入任何生成模型服务（HypiHub 已停用）。纯字幕 / 动效 / 代码渲染的视频不需要模型服务；需要 AI 生图 / 生视频时，可接入 HypiHub 或自建直连 Provider（见 README）。</p>
-          </div>
-        )}
+        {env && PROVIDERS.map((p) => {
+          const ep = profile?.endpoints?.[p.instance];
+          const pAuth = providerAuth[p.instance] ?? null;
+          const configured = pAuth?.credentials.some((c) => c.configured) ?? false;
+          if (!ep) {
+            return (
+              <div className="card" key={p.instance}>
+                <div className="row">
+                  <h3>{p.title}</h3>
+                  <span className="badge badge-warn">未启用</span>
+                </div>
+                <p className="desc">{p.desc}</p>
+                <button className="btn btn-primary" disabled={busy} onClick={() => void enableProvider(p)}>启用</button>
+              </div>
+            );
+          }
+          return (
+            <div className="card" key={p.instance}>
+              <div className="row">
+                <h3>{p.title}</h3>
+                <span className={"badge " + (configured ? "badge-ok" : "badge-warn")}>{configured ? "已连接" : "未配置凭据"}</span>
+                <span className="spacer" />
+                <button className="btn" disabled={busy} onClick={() => test(p.instance)}>测试</button>
+              </div>
+              <p className="desc">{p.desc}</p>
+              <div className="row" style={{ alignItems: "flex-end" }}>
+                <div className="field" style={{ flex: 2 }}>
+                  <label>{p.credLabel}（粘贴后保存，不回显）</label>
+                  <input
+                    type="password"
+                    value={providerSecrets[p.instance] ?? ""}
+                    onChange={(e) => setProviderSecrets((s) => ({ ...s, [p.instance]: e.target.value }))}
+                    placeholder={p.credLabel}
+                  />
+                </div>
+                <div className="field">
+                  <label>&nbsp;</label>
+                  <button className="btn btn-primary" disabled={busy || !providerSecrets[p.instance]} onClick={() => void saveProviderCredential(p.instance)}>保存凭据</button>
+                </div>
+              </div>
+              <div className="field">
+                <label>baseUrl</label>
+                <input
+                  value={typeof ep.config?.baseUrl === "string" ? ep.config.baseUrl : ""}
+                  onChange={(e) => patch(p.instance, "baseUrl", e.target.value)}
+                />
+              </div>
+              {p.modelField === "wireModel" ? (
+                <div className="field">
+                  <label>线上模型 ID</label>
+                  <input
+                    value={typeof ep.config?.wireModel === "string" ? ep.config.wireModel : ""}
+                    onChange={(e) => patch(p.instance, "wireModel", e.target.value)}
+                  />
+                </div>
+              ) : (
+                <div className="row">
+                  {p.models.map(([key, label]) => {
+                    const modelMap = (ep.config?.modelMap as Record<string, string> | undefined) ?? {};
+                    const value = modelMap[key] ?? "";
+                    return (
+                      <div className="field" key={key} style={{ minWidth: 200 }}>
+                        <label>{label}</label>
+                        <input
+                          value={value}
+                          placeholder={p.instance === "volcengine.default" ? "填入方舟控制台的模型 ID" : undefined}
+                          onChange={(e) => patchNested(p.instance, "modelMap", key, e.target.value)}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
         {hub && (
         <div className="card" style={{ gridColumn: "1 / -1" }}>
           <div className="row">
