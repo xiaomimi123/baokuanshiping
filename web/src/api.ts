@@ -40,6 +40,27 @@ export type AuthStatus = {
   endpoint: string;
   credentials: { slot: string; label: string; kind: string; configured: boolean; writable: boolean }[];
 };
+export type TemplateInfo = {
+  id: string;
+  title: string;
+  description: string;
+  requires: { capability: string; label: string }[];
+  variables: { key: string; label: string; kind: "text" | "number" | "asset" }[];
+  cover?: string;
+  availability: { ok: boolean; missing: string[] };
+};
+export type AssetInfo = { file: string; size: number; type: string };
+export type ProjectMeta = {
+  format: string;
+  template: string;
+  title: string;
+  createdAt: string;
+  runSource: string;
+  builds: string[];
+  variables?: Record<string, string>;
+};
+export type ProjectSummary = ProjectMeta & { name: string };
+export type ProjectDetail = ProjectMeta & { name: string; assets: AssetInfo[] };
 export type ProfileEnvelope = { path: string; profile: RuntimeProfile };
 export type RuntimeProfile = {
   format: string; dataRoot: string;

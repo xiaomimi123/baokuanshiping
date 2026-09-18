@@ -2,6 +2,7 @@ import { NavLink, Outlet } from "react-router-dom";
 
 const nav = [
   { to: "/", label: "总览" },
+  { to: "/create", label: "创作" },
   { to: "/models", label: "模型与服务" },
   { to: "/builds", label: "任务" },
   { to: "/studio", label: "Studio" },

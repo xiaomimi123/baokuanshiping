@@ -21,7 +21,7 @@ hpyit爆款视频复刻/
     ├── server/                 # 后端：Fastify + TypeScript（tsx 直跑，无需编译）
     │   └── src/routes/         # runtime / builds / profile / auth / studio 五组路由
     ├── web/                    # 前端：Vite + React + TypeScript
-    │   └── src/pages/          # 总览 / 模型与服务 / 任务 / Studio 四个页面
+    │   └── src/pages/          # 总览 / 创作 / 模型与服务 / 任务 / Studio 五个页面
     └── projects/default/       # Hypit 项目本地包（git 跟踪源码，dist/ 不跟踪）
         └── packages/
             ├── provider-openai-image/  # 直连 OpenAI 兼容生图 Provider（gpt-image-2，immediate）

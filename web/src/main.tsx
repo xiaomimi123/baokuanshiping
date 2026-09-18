@@ -4,6 +4,7 @@ import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import App from "./App";
 import Dashboard from "./pages/Dashboard";
 import Models from "./pages/Models";
+import Create from "./pages/Create";
 import Builds from "./pages/Builds";
 import Studio from "./pages/Studio";
 import "./styles.css";
@@ -14,6 +15,7 @@ const router = createBrowserRouter([
     element: <App />,
     children: [
       { index: true, element: <Dashboard /> },
+      { path: "create", element: <Create /> },
       { path: "models", element: <Models /> },
       { path: "builds", element: <Builds /> },
       { path: "studio", element: <Studio /> },
