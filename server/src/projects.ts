@@ -2,10 +2,10 @@ import { randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync } from "node:fs";
-import { cp, mkdir, readFile, readdir, writeFile, copyFile } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, rename, writeFile, copyFile } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { cfg } from "./config.js";
-import type { TemplateDef } from "./templates.js";
+import type { TemplateDef, VariableDef } from "./templates.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -196,6 +196,59 @@ export async function createProject(
   await writeMeta(name, meta);
 
   return { name, warnings };
+}
+
+/**
+ * 按模板变量描述做锚点精确子串替换（不解析 SVML 语法树，见 spec §5）。
+ * 对 values 中每个 key：当前锚点 = meta.variables?.[key] ?? def.anchor（首次替换用模板声明的原文锚点，
+ * 之后每次替换都以上一次写入的新值作为下一次查找的锚点）。锚点在目标文件中出现次数必须恰为 1，
+ * 否则抛 400 E_ANCHOR（message 含变量 label），文件保持不变。kind:"asset" 的新值必须是落在
+ * assets/uploads/ 内的已存在文件相对路径。替换写回用临时文件 + rename 原子完成。
+ * 全部替换成功后一次性持久化 .workbench.json 的 variables。
+ */
+export async function applyVariables(name: string, defs: VariableDef[], values: Record<string, string>): Promise<void> {
+  const dir = projectDir(name);
+  const meta = await readMeta(name);
+  const variables = { ...(meta.variables ?? {}) };
+
+  for (const [key, newValue] of Object.entries(values)) {
+    const def = defs.find((d) => d.key === key);
+    if (!def) {
+      throw new ProjectError(400, "E_UNKNOWN_VARIABLE", `未知变量：${key}`);
+    }
+    if (typeof newValue !== "string") {
+      throw new ProjectError(400, "E_BAD_VALUE", `变量「${def.label}」的值必须是字符串`);
+    }
+
+    if (def.kind === "asset") {
+      const uploadsDir = join(dir, "assets/uploads");
+      const assetPath = resolve(dir, newValue);
+      if (!assetPath.startsWith(uploadsDir + sep) || !existsSync(assetPath)) {
+        throw new ProjectError(400, "E_ASSET_NOT_FOUND", `变量「${def.label}」引用的素材不存在：${newValue}`);
+      }
+    }
+
+    const filePath = join(dir, def.file);
+    const content = await readFile(filePath, "utf8");
+    const currentAnchor = variables[key] ?? def.anchor;
+    const occurrences = content.split(currentAnchor).length - 1;
+    if (occurrences !== 1) {
+      throw new ProjectError(
+        400,
+        "E_ANCHOR",
+        `变量「${def.label}」的锚点在 ${def.file} 中出现 ${occurrences} 次，必须恰为 1 次才能安全替换`,
+      );
+    }
+
+    const updated = content.replace(currentAnchor, newValue);
+    const tmpPath = `${filePath}.${randomBytes(4).toString("hex")}.tmp`;
+    await writeFile(tmpPath, updated);
+    await rename(tmpPath, filePath);
+
+    variables[key] = newValue;
+  }
+
+  await writeMeta(name, { ...meta, variables });
 }
 
 /** 扫描 projects/*，忽略 default 与无 .workbench.json（脏）目录。 */

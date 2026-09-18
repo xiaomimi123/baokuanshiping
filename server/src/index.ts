@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
+import fastifyMultipart from "@fastify/multipart";
 import { existsSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,6 +28,8 @@ export function buildServer() {
       reply.status(500).send({ error: { code: "E_INTERNAL", message } });
     }
   });
+  // 512MB 上限：仅对使用 multipart 的路由（POST /api/projects/:name/assets）生效，其余路由不解析 multipart。
+  app.register(fastifyMultipart, { limits: { fileSize: 512 * 1024 * 1024 } });
   app.register(runtimeRoutes);
   app.register(buildsRoutes);
   app.register(profileRoutes);

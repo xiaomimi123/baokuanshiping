@@ -1,0 +1,130 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdtemp, mkdir, readdir, readFile, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { vi } from "vitest";
+
+// 与 projects.test.ts 相同套路：projects.ts 读取 cfg 单例，需先设好临时目录环境变量再动态 import。
+let root = "";
+let projects!: typeof import("../src/projects.js");
+
+beforeEach(async () => {
+  root = await mkdtemp(join(tmpdir(), "wb-variables-"));
+  process.env.HYPIT_REPO = join(root, "hypit");
+  process.env.HYPIT_PROJECT = join(root, "projects", "default");
+  await mkdir(join(root, "hypit", "examples"), { recursive: true });
+  await mkdir(process.env.HYPIT_PROJECT, { recursive: true });
+
+  vi.resetModules();
+  projects = await import("../src/projects.js");
+});
+
+afterEach(async () => {
+  await rm(root, { recursive: true, force: true });
+});
+
+async function setupProject(name: string, svmlContent: string): Promise<import("../src/projects.js").ProjectMeta> {
+  const dir = projects.projectDir(name);
+  await mkdir(dir, { recursive: true });
+  await mkdir(join(dir, "assets/uploads"), { recursive: true });
+  await writeFile(join(dir, "chat.svml"), svmlContent);
+  const meta: import("../src/projects.js").ProjectMeta = {
+    format: "workbench.project@1",
+    template: "fake",
+    title: "测试项目",
+    createdAt: new Date().toISOString(),
+    runSource: "chat.svrun",
+    builds: [],
+  };
+  await projects.writeMeta(name, meta);
+  return meta;
+}
+
+describe("applyVariables", () => {
+  it("唯一锚点替换成功，且二次替换（新值作锚点）也成功", async () => {
+    await setupProject("proj-a", "hello world, hello galaxy");
+    const defs: import("../src/templates.js").VariableDef[] = [
+      { key: "title", label: "标题", kind: "text", file: "chat.svml", anchor: "world" },
+    ];
+
+    await projects.applyVariables("proj-a", defs, { title: "there" });
+    const dir = projects.projectDir("proj-a");
+    expect(await readFile(join(dir, "chat.svml"), "utf8")).toBe("hello there, hello galaxy");
+    const meta1 = await projects.readMeta("proj-a");
+    expect(meta1.variables).toEqual({ title: "there" });
+
+    // 第二次替换：当前锚点应是上次写入的新值 "there"，而不是原始 anchor "world"
+    await projects.applyVariables("proj-a", defs, { title: "friend" });
+    expect(await readFile(join(dir, "chat.svml"), "utf8")).toBe("hello friend, hello galaxy");
+    const meta2 = await projects.readMeta("proj-a");
+    expect(meta2.variables).toEqual({ title: "friend" });
+  });
+
+  it("锚点在文件中出现 0 次 → E_ANCHOR 且文件未变", async () => {
+    const content = "hello world";
+    await setupProject("proj-b", content);
+    const defs: import("../src/templates.js").VariableDef[] = [
+      { key: "missing", label: "缺失变量", kind: "text", file: "chat.svml", anchor: "not-here" },
+    ];
+
+    await expect(projects.applyVariables("proj-b", defs, { missing: "x" })).rejects.toMatchObject({
+      status: 400,
+      code: "E_ANCHOR",
+    });
+    const dir = projects.projectDir("proj-b");
+    expect(await readFile(join(dir, "chat.svml"), "utf8")).toBe(content);
+  });
+
+  it("锚点在文件中出现 >1 次 → E_ANCHOR 且报错含变量 label，文件未变", async () => {
+    const content = "dup dup";
+    await setupProject("proj-c", content);
+    const defs: import("../src/templates.js").VariableDef[] = [
+      { key: "dupKey", label: "重复变量标签", kind: "text", file: "chat.svml", anchor: "dup" },
+    ];
+
+    let error: unknown;
+    try {
+      await projects.applyVariables("proj-c", defs, { dupKey: "x" });
+    } catch (err) {
+      error = err;
+    }
+    expect(error).toMatchObject({ status: 400, code: "E_ANCHOR" });
+    expect((error as Error).message).toContain("重复变量标签");
+    const dir = projects.projectDir("proj-c");
+    expect(await readFile(join(dir, "chat.svml"), "utf8")).toBe(content);
+  });
+
+  it("kind:asset 引用不存在的上传文件 → 400", async () => {
+    await setupProject("proj-d", "asset: old.png");
+    const defs: import("../src/templates.js").VariableDef[] = [
+      { key: "cover", label: "封面素材", kind: "asset", file: "chat.svml", anchor: "old.png" },
+    ];
+
+    await expect(
+      projects.applyVariables("proj-d", defs, { cover: "assets/uploads/nope.png" }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("kind:asset 引用存在的上传文件 → 替换成功", async () => {
+    await setupProject("proj-e", "asset: old.png");
+    const dir = projects.projectDir("proj-e");
+    await writeFile(join(dir, "assets/uploads", "new.png"), "fake-bytes");
+    const defs: import("../src/templates.js").VariableDef[] = [
+      { key: "cover", label: "封面素材", kind: "asset", file: "chat.svml", anchor: "old.png" },
+    ];
+
+    await projects.applyVariables("proj-e", defs, { cover: "assets/uploads/new.png" });
+    expect(await readFile(join(dir, "chat.svml"), "utf8")).toBe("asset: assets/uploads/new.png");
+  });
+
+  it("原子写：替换后目标目录不残留 .tmp 文件", async () => {
+    await setupProject("proj-f", "keep anchor-x here");
+    const defs: import("../src/templates.js").VariableDef[] = [
+      { key: "k", label: "K", kind: "text", file: "chat.svml", anchor: "anchor-x" },
+    ];
+    await projects.applyVariables("proj-f", defs, { k: "replaced" });
+    const dir = projects.projectDir("proj-f");
+    const entries = await readdir(dir);
+    expect(entries.some((e) => e.endsWith(".tmp"))).toBe(false);
+  });
+});
