@@ -5,7 +5,7 @@ FROM node:22-bookworm
 RUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=60 update \
     && ( ok=0; for i in 1 2 3 4 5; do \
          apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=60 install -y --no-install-recommends \
-           chromium python3 socat curl ca-certificates git && ok=1 && break; \
+           chromium python3 socat curl ca-certificates git fonts-noto-cjk fonts-noto-color-emoji && ok=1 && break; \
          echo "apt-get install retry $i failed, keeping cached .deb files and retrying..."; sleep 5; \
        done; test "$ok" = "1" ) \
     && rm -rf /var/lib/apt/lists/*
