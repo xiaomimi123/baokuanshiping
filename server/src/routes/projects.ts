@@ -41,7 +41,7 @@ export async function projectsRoutes(app: FastifyInstance) {
     if (!template) {
       return reply.status(404).send({ error: { code: "E_TEMPLATE_NOT_FOUND", message: `未知模板：${body.template}` } });
     }
-    const result = await createProject(template, body.title ?? "");
+    const result = await createProject(template, body.title);
     const meta = await readMeta(result.name);
     return { name: result.name, warnings: result.warnings, ...meta };
   });

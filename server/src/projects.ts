@@ -60,19 +60,23 @@ export async function readMeta(name: string): Promise<ProjectMeta> {
   return JSON.parse(raw) as ProjectMeta;
 }
 
+/** 副作用：项目目录若不存在会被静默创建（recursive mkdir），调用方无需预先建目录。 */
 export async function writeMeta(name: string, meta: ProjectMeta): Promise<void> {
   const dir = projectDir(name);
   await mkdir(dir, { recursive: true });
   await writeFile(join(dir, ".workbench.json"), JSON.stringify(meta, null, 2) + "\n");
 }
 
-function slugifyTitle(title: string): string {
+const SLUG_MAX_LEN = 60;
+
+export function slugifyTitle(title: string): string {
   const base = title
     .toLowerCase()
     .normalize("NFKD")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return base || "project";
+  const truncated = base.slice(0, SLUG_MAX_LEN).replace(/-+$/g, "");
+  return truncated || "project";
 }
 
 function randomSuffix(): string {
@@ -123,6 +127,9 @@ export async function createProject(
   template: TemplateDef,
   title: string,
 ): Promise<{ name: string; warnings: string[] }> {
+  if (typeof title !== "string") {
+    throw new ProjectError(400, "E_BAD_TITLE", "title 必须是字符串");
+  }
   const warnings: string[] = [];
   const root = projectsRoot();
   await mkdir(root, { recursive: true });
@@ -160,14 +167,17 @@ export async function createProject(
     warnings.push("未找到默认 Runtime Profile（projects/default/hypit.runtime.json），项目暂未绑定服务，出片前请先在总览页配置 Profile");
   }
 
-  // 复用 default 已预编译的 provider 包（如 provider-volcengine/provider-openai-image/provider-gemini-image）。
+  // 复用 default 已预编译的 provider 包（如 provider-volcengine/provider-openai-image/provider-gemini-image）：
+  // 这是载荷性需求——新项目的 Profile bindings 引用 @workbench/provider-*，hypit CLI 按"项目本地 packages/"
+  // 的约定解析这些包，不复制会导致对应 endpoint 激活失败。排除 node_modules（体积/符号链接卫生，dist 已够用，
+  // 运行期不需要重新编译）；dist/ 保留，因为 providers:build 已产出，请求路径不需要再跑一次 tsc。
   const defaultPackagesDir = join(cfg.project, "packages");
   if (existsSync(defaultPackagesDir)) {
     const names = await readdir(defaultPackagesDir);
     for (const pkgName of names) {
       const dest = join(dir, "packages", pkgName);
       if (existsSync(dest)) continue; // 模板自带同名包优先，不覆盖
-      await cp(join(defaultPackagesDir, pkgName), dest, { recursive: true });
+      await cp(join(defaultPackagesDir, pkgName), dest, { recursive: true, filter: (src) => !shouldExclude(src) });
     }
   }
 

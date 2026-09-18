@@ -143,6 +143,65 @@ describe("createProject", () => {
     const dir = projects.projectDir(result.name);
     expect(existsSync(join(dir, ".workbench.json"))).toBe(true);
   });
+
+  it("复用 default packages 时排除 node_modules、保留 dist、不触发编译", async () => {
+    await writeFakeTemplateSource("fake-template-3");
+    const defaultPkgDir = join(process.env.HYPIT_PROJECT!, "packages", "provider-fake");
+    await mkdir(join(defaultPkgDir, "dist"), { recursive: true });
+    const distMarkerContent = "// prebuilt, must survive untouched\n";
+    await writeFile(join(defaultPkgDir, "dist", "activation.js"), distMarkerContent);
+    await writeFile(join(defaultPkgDir, "package.json"), JSON.stringify({ name: "@workbench/provider-fake", scripts: { build: "tsc -p tsconfig.json" } }));
+    await writeFile(join(defaultPkgDir, "tsconfig.json"), JSON.stringify({}));
+    await mkdir(join(defaultPkgDir, "node_modules", "some-dep"), { recursive: true }); // 应被排除
+    await writeFile(join(defaultPkgDir, "node_modules", "some-dep", "index.js"), "x");
+
+    const template = {
+      id: "fake-template-3",
+      title: "假模板3",
+      description: "测试用",
+      sourceDir: "fake-template-3",
+      runSource: "chat.svrun",
+      requires: [],
+      variables: [],
+    };
+    const result = await projects.createProject(template, "复用 provider 包");
+    const dir = projects.projectDir(result.name);
+    const copiedPkgDir = join(dir, "packages", "provider-fake");
+
+    expect(existsSync(join(copiedPkgDir, "node_modules"))).toBe(false); // 排除
+    expect(existsSync(join(copiedPkgDir, "dist", "activation.js"))).toBe(true); // dist 保留
+    const copiedContent = await import("node:fs/promises").then((m) => m.readFile(join(copiedPkgDir, "dist", "activation.js"), "utf8"));
+    expect(copiedContent).toBe(distMarkerContent); // 内容与源一致，证明未被 tsc 重新编译覆盖
+    expect(result.warnings.some((w) => w.includes("provider-fake"))).toBe(false); // 未触发编译，自然无编译 warning
+  });
+});
+
+describe("createProject 的 title 校验", () => {
+  const template = {
+    id: "fake-template-title",
+    title: "假模板",
+    description: "测试用",
+    sourceDir: "fake-template-title",
+    runSource: "chat.svrun",
+    requires: [],
+    variables: [],
+  };
+
+  it("超长 title 的 slug 部分截断到 60 字符", async () => {
+    await writeFakeTemplateSource("fake-template-title");
+    const longTitle = "a".repeat(200);
+    const result = await projects.createProject(template, longTitle);
+    const slugPart = result.name.replace(/-[0-9a-f]{4}$/, "");
+    expect(slugPart.length).toBeLessThanOrEqual(60);
+  });
+
+  it("非字符串 title 抛 400 E_BAD_TITLE", async () => {
+    await writeFakeTemplateSource("fake-template-title");
+    await expect(projects.createProject(template, 123 as unknown as string)).rejects.toMatchObject({
+      status: 400,
+      code: "E_BAD_TITLE",
+    });
+  });
 });
 
 describe("listProjects", () => {
