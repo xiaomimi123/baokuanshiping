@@ -10,6 +10,7 @@ import { buildsRoutes } from "./routes/builds.js";
 import { profileRoutes } from "./routes/profile.js";
 import { authRoutes } from "./routes/auth.js";
 import { studioRoutes } from "./routes/studio.js";
+import { templatesRoutes } from "./routes/templates.js";
 
 export function buildServer() {
   const app = Fastify({ logger: true });
@@ -27,6 +28,7 @@ export function buildServer() {
   app.register(profileRoutes);
   app.register(authRoutes);
   app.register(studioRoutes);
+  app.register(templatesRoutes);
   const webDist = resolve(import.meta.dirname, "../../web/dist");
   if (existsSync(webDist)) {
     app.register(fastifyStatic, { root: webDist });
