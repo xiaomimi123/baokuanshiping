@@ -434,7 +434,7 @@ export default function Create() {
               <label>项目标题</label>
               <input value={wizardTitle} onChange={(e) => setWizardTitle(e.target.value)} placeholder="给这个视频起个名字" />
             </div>
-            <div className="grid">
+            <div className="grid-2col">
               {templates?.map((t) => {
                 const disabled = !t.availability.ok;
                 const cover = templateCover(t.id);

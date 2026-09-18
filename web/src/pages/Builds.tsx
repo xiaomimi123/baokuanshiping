@@ -83,24 +83,28 @@ export default function Builds() {
       <h1>任务</h1>
       <p className="sub">Build 历史与实时进度</p>
       {error && <div className="error-box">{error}</div>}
-      <table className="list">
-        <thead><tr><th>ID</th><th>标题</th><th>状态</th><th>创建时间</th><th>产物</th></tr></thead>
-        <tbody>
-          {list?.builds.map((b) => (
-            <tr key={b.id} onClick={() => select(b.id)}>
-              <td style={{ fontFamily: "monospace" }}>{b.id.slice(0, 12)}</td>
-              <td>{b.title ?? b.run ?? "—"}</td>
-              <td><span className={"badge " + (b.outcome === "complete" ? "badge-ok" : b.outcome === "failed" ? "badge-err" : "badge-warn")}>{b.outcome}</span></td>
-              <td>{new Date(b.createdAt).toLocaleString("zh-CN")}</td>
-              <td>{b.outputCount}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {list && list.builds.length > 0 && (
+        <table className="list">
+          <thead><tr><th>ID</th><th>标题</th><th>状态</th><th>创建时间</th><th>产物</th></tr></thead>
+          <tbody>
+            {list.builds.map((b) => (
+              <tr key={b.id} onClick={() => select(b.id)}>
+                <td style={{ fontFamily: "monospace" }}>{b.id.slice(0, 12)}</td>
+                <td>{b.title ?? b.run ?? "—"}</td>
+                <td><span className={"badge " + (b.outcome === "complete" ? "badge-ok" : b.outcome === "failed" ? "badge-err" : "badge-warn")}>{b.outcome}</span></td>
+                <td>{new Date(b.createdAt).toLocaleString("zh-CN")}</td>
+                <td>{b.outputCount}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
       {list?.next && <button className="btn" style={{ marginTop: 12 }} onClick={() => void load(list.next)}>加载更多</button>}
-      {list && list.builds.length === 0 && <p className="sub">还没有 Build。用你的 Agent 提交一个试试。</p>}
+      {list && list.builds.length === 0 && !selected && (
+        <div className="empty-card">还没有 Build。用你的 Agent 提交一个试试。</div>
+      )}
       {selected && detail && (
-        <div className="card" style={{ marginTop: 20 }}>
+        <div className="card" style={{ marginTop: 24 }}>
           <div className="row">
             <h3>{detail.title ?? detail.id}</h3>
             <span className="badge">{detail.work.state}{detail.work.outcome ? ` · ${detail.work.outcome}` : ""}</span>

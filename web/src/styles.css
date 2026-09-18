@@ -67,6 +67,12 @@ body { margin: 0; background: var(--canvas); color: var(--ink); font-size: 14px;
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
 
+/** 响应式两列网格：模板卡等成对展示的卡片列表，窄屏退化单列。 */
+.grid-2col { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+@media (max-width: 900px) {
+  .grid-2col { grid-template-columns: 1fr; }
+}
+
 .card {
   border: 1px solid var(--line); border-radius: var(--radius-card); padding: 20px;
   background: var(--card); box-shadow: var(--shadow-card);
@@ -85,6 +91,7 @@ body { margin: 0; background: var(--canvas); color: var(--ink); font-size: 14px;
 .btn-primary {
   background: var(--brand-grad); border: none; color: #fff;
   box-shadow: var(--shadow-brand);
+  padding: 13px 24px; font-size: 15px;
 }
 .btn-primary:hover { filter: brightness(1.06); }
 .btn:disabled { opacity: 0.5; cursor: default; }
@@ -162,4 +169,10 @@ pre.logs { background: #0e0e0e; color: #ddd; border-radius: 8px; padding: 14px; 
 .transcript-box {
   display: block; width: 100%; margin-top: 8px; min-height: 60px; font-size: 12px;
   border: 1px solid var(--line); border-radius: var(--radius-input); padding: 8px; font-family: monospace;
+}
+
+/** 空态占位卡：与创作页"从模板新建"占位风格一致的虚线圆角浅色卡片。 */
+.empty-card {
+  border: 2px dashed var(--line); border-radius: var(--radius-card); padding: 40px 20px;
+  text-align: center; color: var(--muted); background: transparent;
 }
