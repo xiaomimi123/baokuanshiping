@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   api,
@@ -11,6 +11,18 @@ import {
 type View = "list" | "wizard" | "detail";
 
 const ASSET_KIND_LABEL: Record<string, string> = { video: "视频", audio: "音频", image: "图片" };
+
+/** 模板封面：emoji + 渐变色，纯展示映射，不影响任何业务字段。 */
+const TEMPLATE_COVER: Record<string, { emoji: string; grad: string }> = {
+  "semantic-composition": { emoji: "💬", grad: "linear-gradient(135deg,#21B78F,#0D6B66)" },
+  podcast: { emoji: "🎙️", grad: "linear-gradient(135deg,#8C5CF5,#47299E)" },
+  "ranking-football": { emoji: "🏆", grad: "linear-gradient(135deg,#FA991E,#D94724)" },
+  interview: { emoji: "🎤", grad: "linear-gradient(135deg,#338CF2,#17429E)" },
+};
+const DEFAULT_COVER = { emoji: "✨", grad: "linear-gradient(135deg,#E83F5F,#F06B84)" };
+function templateCover(templateId: string) {
+  return TEMPLATE_COVER[templateId] ?? DEFAULT_COVER;
+}
 
 function isTranscribable(asset: AssetInfo): boolean {
   return asset.type.startsWith("video/") || asset.type.startsWith("audio/");
@@ -374,6 +386,7 @@ export default function Create() {
         <div className="grid">
           {projects?.map((p) => (
             <div className="card" key={p.name}>
+              <div className="project-cover" style={{ background: templateCover(p.template).grad }} />
               <div className="row">
                 <h3>{p.title}</h3>
               </div>
@@ -401,11 +414,17 @@ export default function Create() {
           <button className="btn" onClick={() => setView("list")}>返回列表</button>
         </div>
         <div className="step-bar">
-          {["选模板", "放素材", "改内容并出片"].map((label, i) => (
-            <div key={label} className={"step" + (step === i + 1 ? " active" : step > i + 1 ? " done" : "")}>
-              <span className="step-num">{i + 1}</span>{label}
-            </div>
-          ))}
+          {["选模板", "放素材", "改内容并出片"].map((label, i) => {
+            const done = step > i + 1;
+            return (
+              <Fragment key={label}>
+                {i > 0 && <span className="step-line" />}
+                <div className={"step" + (step === i + 1 ? " active" : done ? " done" : "")}>
+                  <span className="step-num">{done ? "✓" : i + 1}</span>{label}
+                </div>
+              </Fragment>
+            );
+          })}
         </div>
         {error && <div className="error-box">{error}</div>}
 
@@ -418,26 +437,35 @@ export default function Create() {
             <div className="grid">
               {templates?.map((t) => {
                 const disabled = !t.availability.ok;
+                const cover = templateCover(t.id);
                 return (
                   <div
                     key={t.id}
                     className={"card template-card" + (wizardTemplateId === t.id ? " selected" : "") + (disabled ? " disabled" : "")}
                     onClick={() => { if (!disabled) setWizardTemplateId(t.id); }}
                   >
-                    <h3>{t.title}</h3>
-                    <p className="desc">{t.description}</p>
-                    <div className="row">
-                      {t.requires.map((r) => (<span key={r.capability} className="badge">{r.label}</span>))}
+                    <div className="template-cover" style={{ background: cover.grad }}>
+                      <span className="emoji">{cover.emoji}</span>
                     </div>
-                    {disabled && (
-                      <p className="desc" style={{ color: "var(--err)", marginTop: 8 }}>
-                        需先配置：{t.availability.missing.join("、")}（
-                        <a href="/models" onClick={(e) => { e.preventDefault(); e.stopPropagation(); navigate("/models"); }}>
-                          前往模型与服务
-                        </a>
-                        ）
-                      </p>
-                    )}
+                    <div className="template-body">
+                      <h3>{t.title}</h3>
+                      <p className="desc">{t.description}</p>
+                      <div className="row">
+                        {t.requires.map((r) => (<span key={r.capability} className="pill">{r.label}</span>))}
+                        <span className={"pill " + (disabled ? "pill-warn" : "pill-ok")}>
+                          {disabled ? "需配置模型" : "可直接使用"}
+                        </span>
+                      </div>
+                      {disabled && (
+                        <p className="desc" style={{ color: "var(--err)", marginTop: 8 }}>
+                          需先配置：{t.availability.missing.join("、")}（
+                          <a href="/models" onClick={(e) => { e.preventDefault(); e.stopPropagation(); navigate("/models"); }}>
+                            前往模型与服务
+                          </a>
+                          ）
+                        </p>
+                      )}
+                    </div>
                   </div>
                 );
               })}
