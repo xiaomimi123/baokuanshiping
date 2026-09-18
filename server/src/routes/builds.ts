@@ -11,6 +11,14 @@ function sanitizeOutputName(name: string): string {
   return replaced === "." || replaced === ".." || replaced === "" ? "_" : replaced;
 }
 
+// 内联预览用的 MIME 白名单：只允许 outputs 清单里真实出现的三大媒体族，且值本身要形如合法 MIME
+// （拒绝 `../`、`text/html` 等注入/越权尝试）。不在白名单内一律按未传处理（回退 octet-stream + attachment）。
+const INLINE_MEDIA_TYPE = /^(video|image|audio)\/[a-z0-9.+-]+$/;
+
+function inlineMediaType(type: string | undefined): string | undefined {
+  return type !== undefined && INLINE_MEDIA_TYPE.test(type) ? type : undefined;
+}
+
 /**
  * `?project=<name>` 可选：把 runHypit 的 cwd 从默认项目换成该创作项目目录，让 Build 查询落在提交它的项目
  * 自己的本地结果仓库里（hypit 的 Build 结果按提交时的项目根存储，不是全局的）。`projectDir` 内部已做
@@ -86,7 +94,7 @@ export async function buildsRoutes(app: FastifyInstance) {
     },
   );
 
-  app.get<{ Params: { id: string; name: string }; Querystring: { project?: string } }>(
+  app.get<{ Params: { id: string; name: string }; Querystring: { project?: string; type?: string } }>(
     "/api/builds/:id/outputs/:name",
     async (req, reply) => {
       let cwd: string | undefined;
@@ -114,7 +122,10 @@ export async function buildsRoutes(app: FastifyInstance) {
         await rm(dir, { recursive: true, force: true });
         throw err;
       }
-      reply.header("content-disposition", `attachment; filename="${encodeURIComponent(req.params.name)}"`);
+      // `?type=<mediaType>`：白名单内 → 内联模式（真实 Content-Type，不发 attachment，供 <video>/<img>
+      // 直接使用——Safari 等浏览器对内联媒体的 MIME 声明比较严格，回退用 octet-stream 会拒播）。
+      // 不传或不在白名单内 → 保持原行为（octet-stream + attachment，下载语义不变）。
+      const mediaType = inlineMediaType(req.query.type);
       const stream = createReadStream(target);
       let cleaned = false;
       const cleanup = () => {
@@ -124,7 +135,11 @@ export async function buildsRoutes(app: FastifyInstance) {
       };
       stream.on("close", cleanup);
       stream.on("error", cleanup);
-      return reply.type("application/octet-stream").send(stream);
+      if (mediaType === undefined) {
+        reply.header("content-disposition", `attachment; filename="${encodeURIComponent(req.params.name)}"`);
+        return reply.type("application/octet-stream").send(stream);
+      }
+      return reply.type(mediaType).send(stream);
     },
   );
 }

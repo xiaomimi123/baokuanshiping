@@ -38,6 +38,7 @@ export default function Builds() {
   useEffect(() => {
     if (!selected) return;
     let stop = false;
+    setDetail(null);
     setOutputs(null);
     setOutputsError("");
     const projectQuery = selectedProject ? `?project=${encodeURIComponent(selectedProject)}` : "";
@@ -69,9 +70,15 @@ export default function Builds() {
     return () => { stop = true; };
   }, [selected, selectedProject, detail?.result.state]);
 
-  const outputUrl = useCallback((name: string) => {
-    const projectQuery = selectedProject ? `?project=${encodeURIComponent(selectedProject)}` : "";
-    return `/api/builds/${selected}/outputs/${encodeURIComponent(name)}${projectQuery}`;
+  // 下载链接不带 type（保持后端 attachment + octet-stream 语义）；内联播放/展示需要额外的
+  // `&type=<mediaType>`，让后端按真实 MIME 内联返回——Safari 对 <video>/<img> 的 MIME 声明比较严格，
+  // octet-stream 会被拒播。type 值来自 outputs 清单的 mediaType，只在白名单命中时后端才会内联。
+  const outputUrl = useCallback((name: string, mediaType?: string) => {
+    const params = new URLSearchParams();
+    if (selectedProject) params.set("project", selectedProject);
+    if (mediaType) params.set("type", mediaType);
+    const qs = params.toString();
+    return `/api/builds/${selected}/outputs/${encodeURIComponent(name)}${qs ? `?${qs}` : ""}`;
   }, [selected, selectedProject]);
 
   return (
@@ -125,7 +132,12 @@ export default function Builds() {
               {outputs && outputs.length > 0 && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                   {outputs.map((o) => (
-                    <OutputPreview key={o.name} output={o} url={outputUrl(o.name)} />
+                    <OutputPreview
+                      key={o.name}
+                      output={o}
+                      downloadUrl={outputUrl(o.name)}
+                      previewUrl={outputUrl(o.name, o.mediaType)}
+                    />
                   ))}
                 </div>
               )}
@@ -138,7 +150,7 @@ export default function Builds() {
   );
 }
 
-function OutputPreview({ output, url }: { output: BuildOutput; url: string }) {
+function OutputPreview({ output, downloadUrl, previewUrl }: { output: BuildOutput; downloadUrl: string; previewUrl: string }) {
   const [playFailed, setPlayFailed] = useState(false);
   const isVideo = output.mediaType?.startsWith("video/") === true;
   const isImage = output.mediaType?.startsWith("image/") === true;
@@ -152,7 +164,7 @@ function OutputPreview({ output, url }: { output: BuildOutput; url: string }) {
         <span className="desc">{output.mediaType ?? output.type}{output.size != null ? ` · ${(output.size / 1024).toFixed(1)} KB` : ""}</span>
         <span className="spacer" />
         {!isComposite && (
-          <a className="btn" href={url} download={output.name}>下载</a>
+          <a className="btn" href={downloadUrl} download={output.name}>下载</a>
         )}
       </div>
       {isComposite && (
@@ -163,14 +175,14 @@ function OutputPreview({ output, url }: { output: BuildOutput; url: string }) {
       {!isComposite && isVideo && !playFailed && (
         <video
           controls
-          src={url}
+          src={previewUrl}
           style={{ maxWidth: "100%", marginTop: 8 }}
           onError={() => setPlayFailed(true)}
         />
       )}
       {!isComposite && isImage && !playFailed && (
         <img
-          src={url}
+          src={previewUrl}
           alt={output.name}
           style={{ maxWidth: "100%", marginTop: 8 }}
           onError={() => setPlayFailed(true)}
