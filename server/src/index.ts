@@ -5,18 +5,22 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cfg } from "./config.js";
 import { HypitCliError } from "./hypit.js";
+import { ProjectError } from "./projects.js";
 import { runtimeRoutes } from "./routes/runtime.js";
 import { buildsRoutes } from "./routes/builds.js";
 import { profileRoutes } from "./routes/profile.js";
 import { authRoutes } from "./routes/auth.js";
 import { studioRoutes } from "./routes/studio.js";
 import { templatesRoutes } from "./routes/templates.js";
+import { projectsRoutes } from "./routes/projects.js";
 
 export function buildServer() {
   const app = Fastify({ logger: true });
   app.setErrorHandler((error, _req, reply) => {
     if (error instanceof HypitCliError) {
       reply.status(502).send({ error: { code: error.code, message: error.message } });
+    } else if (error instanceof ProjectError) {
+      reply.status(error.status).send({ error: { code: error.code, message: error.message } });
     } else {
       app.log.error(error);
       const message = error instanceof Error ? error.message : String(error);
@@ -29,6 +33,7 @@ export function buildServer() {
   app.register(authRoutes);
   app.register(studioRoutes);
   app.register(templatesRoutes);
+  app.register(projectsRoutes);
   const webDist = resolve(import.meta.dirname, "../../web/dist");
   if (existsSync(webDist)) {
     app.register(fastifyStatic, { root: webDist });
