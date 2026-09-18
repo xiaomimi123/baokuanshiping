@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, lstatSync, readlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -104,7 +104,13 @@ describe("createProject", () => {
 
     const dir = projects.projectDir(result.name);
     expect(existsSync(join(dir, "chat.svml"))).toBe(true);
-    expect(existsSync(join(dir, "node_modules"))).toBe(false);
+    // node_modules 本身现在会存在——linkHypitSdk 在项目自己的 node_modules/@hypit 下补
+    // hypit/driver-node symlink（新项目目录不在 default 的匿名卷保护范围内，需自建，见
+    // projects.ts linkHypitSdk 的注释）；这里只断言它不是从模板源复制来的（模板自带的
+    // node_modules/leftover 必须被排除，只留我们自己建的 @hypit 一个子目录）。
+    expect(existsSync(join(dir, "node_modules", "leftover"))).toBe(false);
+    expect(lstatSync(join(dir, "node_modules", "@hypit", "hypit")).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(join(dir, "node_modules", "@hypit", "hypit"))).toBe(join(root, "hypit"));
     expect(existsSync(join(dir, ".hypit", "runtime"))).toBe(false); // 排除模板自带 .hypit，未复制其原内容
     expect(existsSync(join(dir, "hypit.runtime.json"))).toBe(false); // default 未提供 Profile 时不会生成
     expect(existsSync(join(dir, "assets", "uploads"))).toBe(true);

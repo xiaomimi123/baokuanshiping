@@ -6,6 +6,22 @@ for path in /api/health /api/runtime/status /api/doctor /api/builds /api/profile
   curl -fsS "$base$path" | head -c 300; echo
 done
 
+echo "== assert GET /api/templates 返回非空 templates 数组"
+templates_json="$(curl -fsS "$base/api/templates")"
+echo "$templates_json" | node -e '
+let data = "";
+process.stdin.on("data", (chunk) => { data += chunk; });
+process.stdin.on("end", () => {
+  const body = JSON.parse(data);
+  const templates = Array.isArray(body.templates) ? body.templates : [];
+  if (templates.length === 0) {
+    console.error("FAIL: /api/templates 返回空数组或缺少 templates 字段:", data);
+    process.exit(1);
+  }
+  console.log(`templates OK: count=${templates.length}`);
+});
+'
+
 echo "== assert /api/runtime/status ready:true"
 status_json="$(curl -fsS "$base/api/runtime/status")"
 if ! echo "$status_json" | grep -q '"ready":true'; then

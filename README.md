@@ -60,6 +60,27 @@ docker compose up -d --build
 cd docker && bash smoke.sh
 ```
 
+### 创作页：从模板到成片
+
+工作台内置「创作」页（`/create`），提供不写代码的三步向导：
+
+1. **选模板**：卡片网格，选中一个模板作为起点，输入标题后即在 `projects/<slug>-<随机>/` 下建出一份该模板的独立拷贝（不影响上游 `examples/` 与其他项目）。
+2. **放素材**：拖拽/点击上传文件到该项目的 `assets/uploads/`（可删除、可重传同名覆盖）；参考视频行内有「转写」按钮，把语音转成可复制文本，方便照着改台词。
+3. **改内容并出片**：按模板声明的变量表单改文案/数字/替换素材，点「开始生成」发起一次 `hypit build`，自动跳转任务页并轮询该次 Build 状态；完成后内联预览产物（视频 `<video>`、图片 `<img>`，其余给下载链接）。
+
+已建的项目在项目列表页可再次打开，回到②③继续改、重新出片；新建的项目目录就落在宿主机 `projects/<name>/`（Docker 场景经 `../projects` bind mount），可以直接用文件管理器/编辑器查看产物和源文件，不需要进容器。
+
+四个内置模板及各自所需服务：
+
+| 模板 | 说明 | 所需服务 |
+| --- | --- | --- |
+| 对话动画（`semantic-composition`） | 八秒纯项目组件绘制的聊天动画 | 无——不调用任何生成模型，开箱即可出片 |
+| 双人播客（`podcast`） | 竖屏播客片段，含 AI 配音、生图与生成式插入镜头 | 视频生成（Seedance）+ 图片生成（GPT-Image）+ 语音转写对齐（WhisperX）+ 语音合成（FishAudio） |
+| 球星梗榜单（`ranking-football`） | 主播吐槽式球星排位竖屏短视频 | 同上（Seedance / GPT-Image / WhisperX / FishAudio） |
+| 街头采访（`interview`） | 路人街头采访问答梗视频 | 同上（Seedance / GPT-Image / WhisperX / FishAudio） |
+
+模板卡片上「需先配置 X」的提示即缺失上表对应能力；点击可跳转「模型与服务」页配置（见下文）。素材上传单文件上限 **512MB**，只接受 `video/`、`audio/`、`image/` 大类的常见格式。转写功能依赖 WhisperX 转写 endpoint（目前只能走下文「HypiHub 托管网关」接入），未配置时点「转写」会提示先去模型页配置，不会报无关错误。
+
 ### 方式二：本机开发（不经 Docker）
 
 前提：本机已有 `../hypit` 源码目录，且已安装 Chromium（`HYPERFRAMES` 本地渲染需要）。
@@ -128,6 +149,7 @@ Docker 中 `HYPIT_REPO=/opt/hypit`、`HYPIT_PROJECT=/projects/default` 已在 `d
 ## 已知限制
 
 - **Apple Silicon 上软件渲染较慢**：容器内 Chromium 因 Docker 默认 seccomp 禁用户命名空间而无法用 GPU/沙箱加速，`browserGpu` 固定为 `software`，HyperFrames 本地渲染耗时会明显长于宿主机原生浏览器。
+- **ffmpeg 单独从 Debian trixie 装，不用 bookworm 基础镜像自带的版本**：`node:22-bookworm` 自带 ffmpeg 5.1.9 在本镜像（aarch64）实测有 AAC 编码时长舍入问题——用 `-c:a aac` 把一段精确 8 秒的静音音轨编码进 mp4 后，`ffprobe` 量出的时长变成 7.936s（少 3072 个采样），而 hypit 最终 mux 步骤对采样数做严格校验（容不下 1 个采样的误差），会导致**所有带音轨的 Build**（含创作页任意模板，哪怕是纯本地免模型的对话动画）在最后一步 100% 失败，报 `Final mux audio presentation span differs from TimelineAudio`。`docker/Dockerfile` 因此额外加了一条从 `deb.debian.org/debian trixie` 只装 `ffmpeg` 单个包（及其依赖的 `libavcodec61` 等）的 `RUN`，其余系统包仍锁在 bookworm，未做全局跨发行版升级；trixie 的 ffmpeg 7.1.5 同一条命令量出精确的 8.000000s，问题已在上游修复。
 - **Studio 经 socat 转发**：`hypit studio` 只能监听 `127.0.0.1`，无法直接对容器外暴露；`workbench` 服务用 `socat` 把内部 `5180` 转发到对外 `5179`，多一跳网络代理，属预期行为而非 bug。
 - **凭据 file store 为明文卷**：容器内没有 OS 级钥匙串，`@hypit/credential-store-file` 把 API Key 明文存放在 `hypit-home` 卷下的 `credentials/` 目录中，仅适合本机单人使用场景，不要把该卷同步到不受信任的位置。
 - **单人 / 无鉴权**：Compose 只绑定 `127.0.0.1`，不做多用户或登录鉴权，不要直接暴露到公网。
@@ -143,7 +165,8 @@ Docker 中 `HYPIT_REPO=/opt/hypit`、`HYPIT_PROJECT=/projects/default` 已在 `d
 <!-- 以下状态在实现 Docker 化任务时通过实际执行验证，如后续环境变化请重新核实 -->
 
 - `docker compose build && docker compose up -d` 已在 Apple Silicon + Docker Desktop（linux/arm64 容器）上实际构建并启动成功。
-- `docker/smoke.sh` 对 `/api/health`、`/api/runtime/status`、`/api/doctor`、`/api/builds`、`/api/profile`、`/api/studio` 六个接口的探测已跑通。
+- `docker/smoke.sh` 对 `/api/health`、`/api/runtime/status`、`/api/doctor`、`/api/builds`、`/api/profile`、`/api/studio`、`/api/templates` 七个接口的探测已跑通。
 - `hypit doctor --json` 中浏览器诊断项已确认走 `chromium-nosandbox` 路径；默认纯本地配置下 doctor `ok:true` 无 error。
+- **创作页容器内端到端已实测跑通**：`POST /api/projects`（`semantic-composition` 模板）→ `PUT .../variables` 改文案 → `POST .../build` → 轮询 `GET /api/builds/:id?project=` 至 `complete`（对话动画模板全流程约 14 秒）→ `GET .../outputs` 拿到 `final.video`（`video/mp4`）→ `GET .../outputs/final.video?type=video/mp4` 下载，76501 字节非零、`content-type: video/mp4` 内联头正确、`ffprobe` 确认音视频轨都精确 8.000000s。
 
 如果你在其他环境（不同 CPU 架构、Docker 版本）上遇到构建失败，最常见原因是 apt 源瞬时 502（重试即可）或 `docker/docker-compose.yml` 中 `context` 路径与你的目录布局不一致——本仓库要求 `hypit-workbench` 与 `hypit` 是同级目录。

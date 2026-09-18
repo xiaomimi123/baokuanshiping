@@ -5,8 +5,25 @@ FROM node:22-bookworm
 RUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=60 update \
     && ( ok=0; for i in 1 2 3 4 5; do \
          apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=60 install -y --no-install-recommends \
-           chromium ffmpeg python3 socat curl ca-certificates git && ok=1 && break; \
+           chromium python3 socat curl ca-certificates git && ok=1 && break; \
          echo "apt-get install retry $i failed, keeping cached .deb files and retrying..."; sleep 5; \
+       done; test "$ok" = "1" ) \
+    && rm -rf /var/lib/apt/lists/*
+# ffmpeg：不用 bookworm 自带的 5.1.9——实测它在本镜像（aarch64）上有个 AAC 编码时长舍入 bug：
+# 用 `-c:a aac` 把一段精确 8s（384000 samples@48kHz）的静音音轨编码进 mp4 后，ffprobe 量出的音轨
+# 时长变成 7.936s（少 3072 samples），比预期短 0.064s。hypit `executeMuxProgramMedia` 对最终 mux
+# 产物做严格的采样数校验（容不下 1 个采样的误差），因而任何带音轨的 Build（含创作页 chat 模板的
+# 静音占位音轨）在最后一步 100% 失败，报 "Final mux audio presentation span differs from
+# TimelineAudio"（渲染帧本身完全正常，只坏在这最后一次 mux）。手工用同一条 ffmpeg 命令对比过
+# Debian trixie 的 ffmpeg 7.1.5——量出精确的 8.000000s，问题已在上游修复。这里只从 trixie 装
+# ffmpeg 这一个包（及其依赖的 libavcodec61 等，走 apt 正常依赖解析），其余系统包仍锁在 bookworm，
+# 不做全局跨发行版升级。
+RUN echo "deb http://deb.debian.org/debian trixie main" > /etc/apt/sources.list.d/trixie.list \
+    && apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=60 update \
+    && ( ok=0; for i in 1 2 3 4 5; do \
+         apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=60 install -y --no-install-recommends -t trixie ffmpeg \
+           && ok=1 && break; \
+         echo "apt-get install ffmpeg(trixie) retry $i failed, retrying..."; sleep 5; \
        done; test "$ok" = "1" ) \
     && rm -rf /var/lib/apt/lists/*
 # uv（WhisperX 等 Managed Program 需要；官方安装脚本）

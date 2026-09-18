@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync } from "node:fs";
-import { cp, mkdir, readFile, readdir, rename, writeFile, copyFile } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, rename, writeFile, copyFile, symlink, unlink } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { cfg } from "./config.js";
 import type { TemplateDef, VariableDef } from "./templates.js";
@@ -93,6 +93,26 @@ function shouldExclude(entryPath: string): boolean {
  * 模板自带 project component（packages/*）若无预编译 dist 但有 build 脚本，
  * 在创建时尝试用工作台自身的 tsc 编译一次。编译失败不阻塞创建，记 warning。
  */
+/**
+ * 复用 default 的 provider 包（见下方调用处）只复制了 packages/* 的 dist；但这些包运行时
+ * `import "@hypit/hypit/..."` 要靠 node 模块解析在**项目目录本身**找到 node_modules/@hypit/hypit
+ * symlink 才能定位 SDK ——sync-providers.sh 只在容器启动时为 /projects/default 重建这个
+ * symlink（新项目目录 /projects/<name> 是 default 的兄弟目录，不是其子孙，解析不会向上找到它）。
+ * 不补的话，新建项目一旦 build 触发 provider 激活就会因找不到 @hypit/hypit 而失败。
+ * 与 sync-providers.sh / scripts/setup-providers.sh 用同一个 cfg.hypitRepo 解析目标，
+ * 因此容器（/opt/hypit）和宿主机（$HYPIT_REPO）都能正确指向。
+ */
+async function linkHypitSdk(dir: string): Promise<void> {
+  const nodeModulesHypit = join(dir, "node_modules/@hypit");
+  await mkdir(nodeModulesHypit, { recursive: true });
+  const sdkLink = join(nodeModulesHypit, "hypit");
+  if (existsSync(sdkLink)) await unlink(sdkLink);
+  await symlink(cfg.hypitRepo, sdkLink, "dir");
+  const driverNodeLink = join(nodeModulesHypit, "driver-node");
+  if (existsSync(driverNodeLink)) await unlink(driverNodeLink);
+  await symlink(join(cfg.hypitRepo, "packages/driver-node"), driverNodeLink, "dir");
+}
+
 async function compileBundledPackages(dir: string, warnings: string[]): Promise<void> {
   const packagesDir = join(dir, "packages");
   if (!existsSync(packagesDir)) return;
@@ -181,6 +201,7 @@ export async function createProject(
     }
   }
 
+  await linkHypitSdk(dir);
   await compileBundledPackages(dir, warnings);
 
   await mkdir(join(dir, "assets/uploads"), { recursive: true });
