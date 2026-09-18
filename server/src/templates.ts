@@ -184,11 +184,8 @@ type Availability = Record<string, { ok: boolean; missing: string[] }>;
 let cache: { at: number; value: Availability } | null = null;
 const CACHE_TTL_MS = 60_000;
 
-/** 纯读当前 Profile 的 endpoints+bindings 判断每个模板 requires 是否已配置；不跑 doctor。60s 内存缓存。 */
-export async function templateAvailability(): Promise<Availability> {
-  const now = Date.now();
-  if (cache && now - cache.at < CACHE_TTL_MS) return cache.value;
-
+/** 纯读当前 Profile 的 endpoints+bindings；解析失败或文件不存在按"无 Profile"处理，全部返回空。 */
+async function readProfileBindings(): Promise<{ endpointIds: Set<string>; bindings: Record<string, string> }> {
   const path = await profilePath();
   let bindings: Record<string, string> = {};
   let endpointIds = new Set<string>();
@@ -204,18 +201,39 @@ export async function templateAvailability(): Promise<Availability> {
       // 解析失败按"无 Profile"处理，全部模型 capability 视为未配置
     }
   }
+  return { endpointIds, bindings };
+}
 
-  // capability（如 "@hypit/seedance@1"）已配置 = 存在一条 bindings["<capability>#<model>"]，
-  // 且其目标 endpoint 确实存在于 Profile 的 endpoints 中。
-  const isConfigured = (capability: string): boolean =>
-    Object.entries(bindings).some(([key, endpoint]) => key.startsWith(`${capability}#`) && endpointIds.has(endpoint));
+// capability（如 "@hypit/seedance@1"）已配置 = 存在一条 bindings["<capability>#<model>"]，
+// 且其目标 endpoint 确实存在于 Profile 的 endpoints 中。
+function isCapabilityConfigured(capability: string, endpointIds: Set<string>, bindings: Record<string, string>): boolean {
+  return Object.entries(bindings).some(([key, endpoint]) => key.startsWith(`${capability}#`) && endpointIds.has(endpoint));
+}
+
+/** 纯读当前 Profile 的 endpoints+bindings 判断每个模板 requires 是否已配置；不跑 doctor。60s 内存缓存。 */
+export async function templateAvailability(): Promise<Availability> {
+  const now = Date.now();
+  if (cache && now - cache.at < CACHE_TTL_MS) return cache.value;
+
+  const { endpointIds, bindings } = await readProfileBindings();
 
   const value: Availability = {};
   for (const template of TEMPLATES) {
-    const missing = template.requires.filter((r) => !isConfigured(r.capability)).map((r) => r.label);
+    const missing = template.requires
+      .filter((r) => !isCapabilityConfigured(r.capability, endpointIds, bindings))
+      .map((r) => r.label);
     value[template.id] = { ok: missing.length === 0, missing };
   }
 
   cache = { at: now, value };
   return value;
+}
+
+/**
+ * 转写（WhisperX 对齐）能力是否有可用 endpoint。与 templateAvailability 同源判断逻辑（纯读 Profile，
+ * 不跑 doctor），但不缓存——转写是显式低频调用，不像模板列表那样高频轮询。
+ */
+export async function isTranscribeAvailable(): Promise<boolean> {
+  const { endpointIds, bindings } = await readProfileBindings();
+  return isCapabilityConfigured(WHISPERX.capability, endpointIds, bindings);
 }

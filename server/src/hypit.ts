@@ -22,7 +22,14 @@ export function parseCliJson(stdout: string, exitCode: number): Record<string, u
   }
   const view = parsed as Record<string, unknown>;
   if (view.format === "hypit.cli-error@1") {
-    throw new HypitCliError(String(view.code ?? "E_CLI"), String(view.message ?? "hypit 命令失败"), view);
+    // 真实 CLI 输出把 code/message 嵌在 `error` 字段里（{format, ok:false, error:{code,message,...}}），
+    // 不是顶层；顶层兜底只是防御性写法（万一某个命令版本输出扁平结构）。
+    const nested = (view.error && typeof view.error === "object" ? view.error : undefined) as
+      | Record<string, unknown>
+      | undefined;
+    const code = nested?.code ?? view.code;
+    const message = nested?.message ?? view.message;
+    throw new HypitCliError(String(code ?? "E_CLI"), String(message ?? "hypit 命令失败"), view);
   }
   return view;
 }

@@ -1,10 +1,12 @@
 import type { FastifyInstance } from "fastify";
 import { createWriteStream, existsSync } from "node:fs";
-import { mkdir, readdir, stat, unlink } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, unlink } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
+import { tmpdir } from "node:os";
 import { basename, extname, join, sep } from "node:path";
-import { TEMPLATES } from "../templates.js";
-import { applyVariables, assertSlug, createProject, listProjects, projectDir, readMeta } from "../projects.js";
+import { HypitCliError, runHypit } from "../hypit.js";
+import { TEMPLATES, isTranscribeAvailable } from "../templates.js";
+import { applyVariables, assertSlug, createProject, listProjects, projectDir, readMeta, writeMeta } from "../projects.js";
 
 const MIME: Record<string, string> = {
   ".mp4": "video/mp4",
@@ -162,4 +164,89 @@ export async function projectsRoutes(app: FastifyInstance) {
       return { name: req.params.name, ...updated, assets };
     },
   );
+
+  app.post<{ Params: { name: string }; Body: { asset?: string; language?: string } }>(
+    "/api/projects/:name/transcribe",
+    async (req, reply) => {
+      try {
+        await readMeta(req.params.name);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+          return reply.status(404).send({ error: { code: "E_NOT_FOUND", message: `项目不存在：${req.params.name}` } });
+        }
+        throw err;
+      }
+
+      const assetName = req.body?.asset;
+      if (typeof assetName !== "string" || assetName.length === 0) {
+        return reply.status(400).send({ error: { code: "E_BAD_ASSET", message: "asset 必须是素材文件名字符串" } });
+      }
+      assertSlug(assetName); // 同 assets 路由：拒绝越界/非法文件名
+      const uploadsDir = join(projectDir(req.params.name), "assets/uploads");
+      const assetPath = join(uploadsDir, assetName);
+      if (!assetPath.startsWith(uploadsDir + sep) || !existsSync(assetPath)) {
+        return reply.status(404).send({ error: { code: "E_ASSET_NOT_FOUND", message: `素材不存在：${assetName}` } });
+      }
+
+      // 纯读 Profile 判断转写能力（与 templateAvailability 同源逻辑），不跑 doctor。
+      if (!(await isTranscribeAvailable())) {
+        return reply.status(409).send({
+          error: {
+            code: "E_NO_TRANSCRIBER",
+            message: "尚未配置语音转写（WhisperX）服务，请先前往「模型」页配置对应 Endpoint 后再试",
+          },
+        });
+      }
+
+      // hypit transcribe 要求显式语言码（无 auto），且 --to 目标文件不能预先存在；
+      // 用一次性临时目录接住输出，读出全部段落文本后立即清理，不在项目内留痕。
+      const language = typeof req.body?.language === "string" && req.body.language.length > 0 ? req.body.language : "zh";
+      const scratch = await mkdtemp(join(tmpdir(), "workbench-transcribe-"));
+      const to = join(scratch, "transcript.json");
+      try {
+        await runHypit(["transcribe", assetPath, "--to", to, "--language", language], {
+          cwd: projectDir(req.params.name),
+          timeoutMs: 600_000,
+        });
+        const transcript = JSON.parse(await readFile(to, "utf8")) as { passages?: { text?: string }[] };
+        const text = (transcript.passages ?? []).map((p) => p.text ?? "").join("\n");
+        return { text };
+      } finally {
+        await rm(scratch, { recursive: true, force: true });
+      }
+    },
+  );
+
+  app.post<{ Params: { name: string } }>("/api/projects/:name/build", async (req, reply) => {
+    let meta;
+    try {
+      meta = await readMeta(req.params.name);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        return reply.status(404).send({ error: { code: "E_NOT_FOUND", message: `项目不存在：${req.params.name}` } });
+      }
+      throw err;
+    }
+
+    let result: Record<string, unknown>;
+    try {
+      result = await runHypit(["build", meta.runSource], { cwd: projectDir(req.params.name), timeoutMs: 120_000 });
+    } catch (err) {
+      if (err instanceof HypitCliError) {
+        // Runtime 未就绪（Worker 未起/程序不可用）时 CLI 报错信息含 "Runtime" 关键字，附中文引导后原样透传（全局
+        // 错误处理器把 HypitCliError 映射为 502）。
+        const hint = /runtime/i.test(err.message) ? "；请先在总览页启动 Runtime" : "";
+        throw new HypitCliError(err.code, `${err.message}${hint}`, err.detail);
+      }
+      throw err;
+    }
+
+    const buildId = (result.build as { id?: unknown } | undefined)?.id;
+    if (typeof buildId !== "string") {
+      throw new HypitCliError("E_PARSE", "hypit build 输出缺少 build.id 字段", result);
+    }
+
+    await writeMeta(req.params.name, { ...meta, builds: [...meta.builds, buildId] });
+    return { buildId };
+  });
 }

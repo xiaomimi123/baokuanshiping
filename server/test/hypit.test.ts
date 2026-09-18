@@ -14,6 +14,14 @@ describe("parseCliJson", () => {
       expect((e as HypitCliError).message).toBe("boom");
     }
   });
+  it("cli-error 真实 CLI 形态（code/message 嵌在 error 字段内）转 HypitCliError", () => {
+    const out = JSON.stringify({ format: "hypit.cli-error@1", ok: false, error: { code: "E_Y", message: "boom-nested" } });
+    try { parseCliJson(out, 1); throw new Error("应抛出 HypitCliError"); } catch (e) {
+      expect(e).toBeInstanceOf(HypitCliError);
+      expect((e as HypitCliError).code).toBe("E_Y");
+      expect((e as HypitCliError).message).toBe("boom-nested");
+    }
+  });
   it("非 JSON 输出 + 非零退出码 → HypitCliError(code=E_CLI)", () => {
     expect(() => parseCliJson("garbage", 2)).toThrowError(HypitCliError);
   });
