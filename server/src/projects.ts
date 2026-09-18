@@ -211,6 +211,8 @@ export async function applyVariables(name: string, defs: VariableDef[], values: 
   const meta = await readMeta(name);
   const variables = { ...(meta.variables ?? {}) };
 
+  type Entry = { key: string; def: VariableDef; newValue: string };
+  const entries: Entry[] = [];
   for (const [key, newValue] of Object.entries(values)) {
     const def = defs.find((d) => d.key === key);
     if (!def) {
@@ -219,7 +221,6 @@ export async function applyVariables(name: string, defs: VariableDef[], values: 
     if (typeof newValue !== "string") {
       throw new ProjectError(400, "E_BAD_VALUE", `变量「${def.label}」的值必须是字符串`);
     }
-
     if (def.kind === "asset") {
       const uploadsDir = join(dir, "assets/uploads");
       const assetPath = resolve(dir, newValue);
@@ -227,28 +228,56 @@ export async function applyVariables(name: string, defs: VariableDef[], values: 
         throw new ProjectError(400, "E_ASSET_NOT_FOUND", `变量「${def.label}」引用的素材不存在：${newValue}`);
       }
     }
-
-    const filePath = join(dir, def.file);
-    const content = await readFile(filePath, "utf8");
-    const currentAnchor = variables[key] ?? def.anchor;
-    const occurrences = content.split(currentAnchor).length - 1;
-    if (occurrences !== 1) {
-      throw new ProjectError(
-        400,
-        "E_ANCHOR",
-        `变量「${def.label}」的锚点在 ${def.file} 中出现 ${occurrences} 次，必须恰为 1 次才能安全替换`,
-      );
-    }
-
-    const updated = content.replace(currentAnchor, newValue);
-    const tmpPath = `${filePath}.${randomBytes(4).toString("hex")}.tmp`;
-    await writeFile(tmpPath, updated);
-    await rename(tmpPath, filePath);
-
-    variables[key] = newValue;
+    entries.push({ key, def, newValue });
   }
 
-  await writeMeta(name, { ...meta, variables });
+  /**
+   * 在 `contentByFile`（同一批次内跨 key 累积的模拟/实际文件内容缓存）上定位当前锚点并校验恰好出现 1 次，
+   * 找不到时按 `readFile` 兜底读磁盘。返回替换后的新内容；不落盘。
+   */
+  function anchorReplace(entry: Entry, filePath: string, contentByFile: Map<string, string>, readDisk: () => Promise<string>) {
+    return (async () => {
+      let content = contentByFile.get(filePath);
+      if (content === undefined) content = await readDisk();
+      const currentAnchor = variables[entry.key] ?? entry.def.anchor;
+      const occurrences = content.split(currentAnchor).length - 1;
+      if (occurrences !== 1) {
+        throw new ProjectError(
+          400,
+          "E_ANCHOR",
+          `变量「${entry.def.label}」的锚点在 ${entry.def.file} 中出现 ${occurrences} 次，必须恰为 1 次才能安全替换`,
+        );
+      }
+      return content.replace(currentAnchor, entry.newValue);
+    })();
+  }
+
+  // 第一遍：仅校验（不写盘）。用内存缓存模拟同一文件被多个 key 依次替换后的中间内容，
+  // 确保"同文件多变量批次"的校验顺序与实际写入顺序一致。任一 key 校验失败即整体抛错，磁盘零改动。
+  const dryRunContents = new Map<string, string>();
+  for (const entry of entries) {
+    const filePath = join(dir, entry.def.file);
+    const updated = await anchorReplace(entry, filePath, dryRunContents, () => readFile(filePath, "utf8"));
+    dryRunContents.set(filePath, updated);
+  }
+
+  // 第二遍：真正执行替换写盘。极小概率下（校验后、写盘前文件被外部改动）复核仍可能失败——
+  // 此时把已成功写盘的 key 落 meta 后再抛错，保证 meta 与磁盘状态一致，不出现"陈旧锚点"。
+  const writtenContents = new Map<string, string>();
+  try {
+    for (const entry of entries) {
+      const filePath = join(dir, entry.def.file);
+      const updated = await anchorReplace(entry, filePath, writtenContents, () => readFile(filePath, "utf8"));
+      const tmpPath = `${filePath}.${randomBytes(4).toString("hex")}.tmp`;
+      await writeFile(tmpPath, updated);
+      await rename(tmpPath, filePath);
+      writtenContents.set(filePath, updated);
+      variables[entry.key] = entry.newValue;
+    }
+  } finally {
+    // 无论成功还是中途失败，都持久化目前已生效的 variables（失败时是"已成功的前缀"，与磁盘一致）。
+    await writeMeta(name, { ...meta, variables });
+  }
 }
 
 /** 扫描 projects/*，忽略 default 与无 .workbench.json（脏）目录。 */

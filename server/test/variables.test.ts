@@ -117,6 +117,42 @@ describe("applyVariables", () => {
     expect(await readFile(join(dir, "chat.svml"), "utf8")).toBe("asset: assets/uploads/new.png");
   });
 
+  it("3 变量批次中第 2 个锚点不唯一 → 预校验阶段整体失败，所有文件与 meta 均不变", async () => {
+    const content = "alpha one, beta two two, gamma three";
+    await setupProject("proj-g", content);
+    const defs: import("../src/templates.js").VariableDef[] = [
+      { key: "k1", label: "第一个", kind: "text", file: "chat.svml", anchor: "alpha" },
+      { key: "k2", label: "第二个", kind: "text", file: "chat.svml", anchor: "two" }, // 出现两次
+      { key: "k3", label: "第三个", kind: "text", file: "chat.svml", anchor: "gamma" },
+    ];
+
+    await expect(
+      projects.applyVariables("proj-g", defs, { k1: "A", k2: "B", k3: "C" }),
+    ).rejects.toMatchObject({ status: 400, code: "E_ANCHOR" });
+
+    const dir = projects.projectDir("proj-g");
+    expect(await readFile(join(dir, "chat.svml"), "utf8")).toBe(content); // 第一个 key 也未被写盘
+    const meta = await projects.readMeta("proj-g");
+    expect(meta.variables).toBeUndefined(); // meta 完全未改动
+  });
+
+  it("预校验全部通过的多变量批次：全部成功写入，且互不干扰", async () => {
+    const content = "alpha one, beta two, gamma three";
+    await setupProject("proj-h", content);
+    const defs: import("../src/templates.js").VariableDef[] = [
+      { key: "k1", label: "第一个", kind: "text", file: "chat.svml", anchor: "alpha" },
+      { key: "k2", label: "第二个", kind: "text", file: "chat.svml", anchor: "two" },
+      { key: "k3", label: "第三个", kind: "text", file: "chat.svml", anchor: "gamma" },
+    ];
+
+    await projects.applyVariables("proj-h", defs, { k1: "A", k2: "B", k3: "C" });
+
+    const dir = projects.projectDir("proj-h");
+    expect(await readFile(join(dir, "chat.svml"), "utf8")).toBe("A one, beta B, C three");
+    const meta = await projects.readMeta("proj-h");
+    expect(meta.variables).toEqual({ k1: "A", k2: "B", k3: "C" });
+  });
+
   it("原子写：替换后目标目录不残留 .tmp 文件", async () => {
     await setupProject("proj-f", "keep anchor-x here");
     const defs: import("../src/templates.js").VariableDef[] = [

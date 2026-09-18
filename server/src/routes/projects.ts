@@ -89,7 +89,11 @@ export async function projectsRoutes(app: FastifyInstance) {
     const rejected: string[] = [];
     for await (const part of req.files()) {
       const ext = extname(part.filename).toLowerCase();
-      if (!(ext in MIME)) {
+      const expectedMime = MIME[ext];
+      // 基础防护：扩展名合法只是第一道关卡，还要求浏览器/客户端申报的 mimetype 大类（video/audio/image）
+      // 与扩展名对应的大类一致，防止把 .png 之类的白名单扩展名套在任意二进制内容上蒙混过关。
+      const expectedCategory = expectedMime ? `${expectedMime.split("/")[0]}/` : undefined;
+      if (!expectedMime || !part.mimetype.startsWith(expectedCategory!)) {
         rejected.push(part.filename);
         part.file.resume(); // 丢弃流内容，避免请求挂起
         continue;
