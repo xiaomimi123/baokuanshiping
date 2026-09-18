@@ -192,7 +192,10 @@ function VariablesPanel({
     } catch (e) {
       const message = (e as Error).message;
       setError(message);
-      const match = template.variables.find((v) => message.includes(v.label));
+      // 按 label 长度降序匹配：避免"标题"误配到"标题2"这类互为子串的更短 label。
+      const match = [...template.variables]
+        .sort((a, b) => b.label.length - a.label.length)
+        .find((v) => message.includes(v.label));
       if (match) { setBadKey(match.key); setBadLabel(match.label); }
     } finally {
       setSaving(false);
@@ -277,8 +280,19 @@ export default function Create() {
     setView("wizard");
   };
 
-  const createProject = async () => {
+  // 步骤①的「下一步」：若已经为当前选中的模板建过项目（回退再前进的情况），直接进第②步，不重复
+  // POST /api/projects——否则每次"上一步再下一步"都会在磁盘上留一个孤儿项目目录。只有当模板真的
+  // 换了（与已建项目的 template 不一致）才会新建，此时用 confirm 提示旧项目不会被自动清理。
+  const goToStep2 = async () => {
     if (!wizardTemplateId || !wizardTitle.trim()) return;
+    if (current && current.template === wizardTemplateId) {
+      setStep(2);
+      return;
+    }
+    if (current && current.template !== wizardTemplateId) {
+      const ok = window.confirm(`更换模板将新建一个项目（原项目「${current.title}」不会被自动删除）。是否继续？`);
+      if (!ok) return;
+    }
     setCreating(true);
     setError("");
     try {
@@ -402,7 +416,11 @@ export default function Create() {
                     </div>
                     {disabled && (
                       <p className="desc" style={{ color: "var(--err)", marginTop: 8 }}>
-                        需先配置：{t.availability.missing.join("、")}（前往<a href="/models">模型与服务</a>）
+                        需先配置：{t.availability.missing.join("、")}（
+                        <a href="/models" onClick={(e) => { e.preventDefault(); e.stopPropagation(); navigate("/models"); }}>
+                          前往模型与服务
+                        </a>
+                        ）
                       </p>
                     )}
                   </div>
@@ -414,7 +432,7 @@ export default function Create() {
               <button
                 className="btn btn-primary"
                 disabled={!wizardTemplateId || !wizardTitle.trim() || creating}
-                onClick={() => void createProject()}
+                onClick={() => void goToStep2()}
               >
                 下一步
               </button>
