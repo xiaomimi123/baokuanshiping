@@ -163,6 +163,7 @@ function VariablesPanel({
   template,
   assets,
   values,
+  savedVariables,
   onValuesChange,
   onSaved,
 }: {
@@ -170,6 +171,8 @@ function VariablesPanel({
   template: TemplateInfo;
   assets: AssetInfo[];
   values: Record<string, string>;
+  /** 项目已持久化的变量值（.workbench.json 的 variables）；优先级高于模板 initial，低于本地未保存编辑（values）。 */
+  savedVariables?: Record<string, string>;
   onValuesChange: (values: Record<string, string>) => void;
   onSaved?: () => void;
 }) {
@@ -183,9 +186,14 @@ function VariablesPanel({
     setError("");
     setBadKey(null);
     try {
+      // 空值锚点会被后端拒绝（E_BAD_VALUE，见 projects.ts applyVariables）；这里干脆不发送空串的
+      // key，避免用户还没决定改哪个字段时，其余留空的字段把整批保存都锁死。
+      const nonEmptyValues = Object.fromEntries(
+        Object.entries(values).filter(([, v]) => v.trim() !== ""),
+      );
       const data = await api<{ variables?: Record<string, string> }>(
         `/api/projects/${encodeURIComponent(projectName)}/variables`,
-        { method: "PUT", body: JSON.stringify({ values }) },
+        { method: "PUT", body: JSON.stringify({ values: nonEmptyValues }) },
       );
       onValuesChange(data.variables ?? values);
       onSaved?.();
@@ -205,28 +213,36 @@ function VariablesPanel({
   return (
     <div>
       {error && <div className="error-box">{error}{badKey ? `（字段：${badLabel}）` : ""}</div>}
-      {template.variables.map((v) => (
-        <div className="field" key={v.key}>
-          <label style={badKey === v.key ? { color: "var(--err)" } : undefined}>{v.label}</label>
-          {v.kind === "asset" ? (
-            <select
-              value={values[v.key] ?? ""}
-              onChange={(e) => onValuesChange({ ...values, [v.key]: e.target.value })}
-              style={badKey === v.key ? { borderColor: "var(--err)" } : undefined}
-            >
-              <option value="">（选择已上传素材）</option>
-              {assets.map((a) => (<option key={a.file} value={a.file}>{a.file}</option>))}
-            </select>
-          ) : (
-            <input
-              type={v.kind === "number" ? "number" : "text"}
-              value={values[v.key] ?? ""}
-              onChange={(e) => onValuesChange({ ...values, [v.key]: e.target.value })}
-              style={badKey === v.key ? { borderColor: "var(--err)" } : undefined}
-            />
-          )}
-        </div>
-      ))}
+      <p className="sub">留空的变量不会被修改。</p>
+      {template.variables.map((v) => {
+        // 优先级：本地未保存编辑（values） > 项目已保存变量（savedVariables） > 模板锚点原文（initial）。
+        // asset 类没有 initial（后端不下发），未选择时就是空串，对应下拉的"（选择已上传素材）"。
+        const displayValue = values[v.key] ?? savedVariables?.[v.key] ?? v.initial ?? "";
+        return (
+          <div className="field" key={v.key}>
+            <label style={badKey === v.key ? { color: "var(--err)" } : undefined}>{v.label}</label>
+            {v.kind === "asset" ? (
+              <select
+                value={displayValue}
+                onChange={(e) => onValuesChange({ ...values, [v.key]: e.target.value })}
+                style={badKey === v.key ? { borderColor: "var(--err)" } : undefined}
+              >
+                <option value="">（选择已上传素材）</option>
+                {assets.map((a) => (
+                  <option key={a.file} value={`./assets/uploads/${a.file}`}>{a.file}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type={v.kind === "number" ? "number" : "text"}
+                value={displayValue}
+                onChange={(e) => onValuesChange({ ...values, [v.key]: e.target.value })}
+                style={badKey === v.key ? { borderColor: "var(--err)" } : undefined}
+              />
+            )}
+          </div>
+        );
+      })}
       <button className="btn btn-primary" disabled={saving} onClick={() => void save()}>保存修改</button>
     </div>
   );
@@ -332,16 +348,15 @@ export default function Create() {
       const data = await api<{ buildId: string }>(`/api/projects/${encodeURIComponent(current.name)}/build`, {
         method: "POST",
       });
-      sessionStorage.setItem("workbench.selectedBuild", JSON.stringify({ buildId: data.buildId, project: current.name }));
-      navigate("/builds");
+      // I7：选中态放进 /builds 的查询参数（而不是 sessionStorage），刷新页面/分享链接都能保持。
+      navigate(`/builds?project=${encodeURIComponent(current.name)}&id=${encodeURIComponent(data.buildId)}`);
     } catch (e) { setError((e as Error).message); }
     finally { setBuilding(false); }
   };
 
   const goToBuild = (buildId: string) => {
     if (!current) return;
-    sessionStorage.setItem("workbench.selectedBuild", JSON.stringify({ buildId, project: current.name }));
-    navigate("/builds");
+    navigate(`/builds?project=${encodeURIComponent(current.name)}&id=${encodeURIComponent(buildId)}`);
   };
 
   if (view === "list") {
@@ -458,6 +473,7 @@ export default function Create() {
               template={template}
               assets={current.assets}
               values={values}
+              savedVariables={current.variables}
               onValuesChange={setValues}
               onSaved={() => void refreshCurrent()}
             />
@@ -500,6 +516,7 @@ export default function Create() {
               template={template}
               assets={current.assets}
               values={values}
+              savedVariables={current.variables}
               onValuesChange={setValues}
               onSaved={() => void refreshCurrent()}
             />

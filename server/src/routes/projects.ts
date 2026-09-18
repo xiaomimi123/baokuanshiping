@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { createHash } from "node:crypto";
 import { createWriteStream, existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, unlink } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
@@ -6,7 +7,7 @@ import { tmpdir } from "node:os";
 import { basename, extname, join, sep } from "node:path";
 import { HypitCliError, runHypit } from "../hypit.js";
 import { TEMPLATES, isTranscribeAvailable } from "../templates.js";
-import { applyVariables, assertSlug, createProject, listProjects, projectDir, readMeta, writeMeta } from "../projects.js";
+import { applyVariables, assertSlug, createProject, listProjects, ProjectError, projectDir, readMeta, writeMeta } from "../projects.js";
 
 const MIME: Record<string, string> = {
   ".mp4": "video/mp4",
@@ -22,8 +23,13 @@ const MIME: Record<string, string> = {
   ".webp": "image/webp",
 };
 
-/** 素材文件名 slug 化：小写字母/数字，其余替换为 `-`，保留原扩展名；空名兜底为 "asset"。 */
-function slugifyFilename(original: string): string {
+/**
+ * 素材文件名 slug 化：小写字母/数字，其余替换为 `-`，保留原扩展名。
+ * 非 ASCII 文件名（如纯中文）经 NFKD 分解 + 过滤后 base 会塌成空串——两个不同的中文名因此都会
+ * 兜底成同一个 "asset.<ext>" 并静默互相覆盖（I3）。兜底改为对原始文件名取 md5 前 6 位，
+ * 保证不同原名兜底到不同文件名；`existingNames` 命中时再递增 `-2`/`-3` 后缀，不静默覆盖。
+ */
+export function slugifyFilename(original: string, existingNames: Set<string>): string {
   const ext = extname(original).toLowerCase();
   const stem = basename(original, extname(original));
   const base = stem
@@ -31,7 +37,14 @@ function slugifyFilename(original: string): string {
     .normalize("NFKD")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return `${base || "asset"}${ext}`;
+  const fallback = base || `asset-${createHash("md5").update(original).digest("hex").slice(0, 6)}`;
+  let candidate = `${fallback}${ext}`;
+  let n = 2;
+  while (existingNames.has(candidate)) {
+    candidate = `${fallback}-${n}${ext}`;
+    n += 1;
+  }
+  return candidate;
 }
 
 async function listUploads(name: string): Promise<{ file: string; size: number; type: string }[]> {
@@ -87,6 +100,10 @@ export async function projectsRoutes(app: FastifyInstance) {
     const uploadsDir = join(projectDir(req.params.name), "assets/uploads");
     await mkdir(uploadsDir, { recursive: true });
 
+    // 已存在文件名（含磁盘已有 + 本批次内已保存的）：slugifyFilename 用它判断是否需要递增
+    // `-2`/`-3` 后缀，避免同批多个非 ASCII 文件名塌成同一个兜底名后互相静默覆盖（I3）。
+    const existingNames = new Set((await listUploads(req.params.name)).map((a) => a.file));
+
     const saved: string[] = [];
     const rejected: string[] = [];
     for await (const part of req.files()) {
@@ -100,9 +117,25 @@ export async function projectsRoutes(app: FastifyInstance) {
         part.file.resume(); // 丢弃流内容，避免请求挂起
         continue;
       }
-      const filename = slugifyFilename(part.filename);
+      const filename = slugifyFilename(part.filename, existingNames);
       const dest = join(uploadsDir, filename);
-      await pipeline(part.file, createWriteStream(dest)); // 同名覆盖
+      try {
+        await pipeline(part.file, createWriteStream(dest));
+        // I4：@fastify/multipart 命中 fileSize 限制时不会让 pipeline() 本身报错——busboy 只是把
+        // 该文件流截断在限制处正常结束（'limit' 事件只设置内部 lastError，直到整个 for-await 迭代
+        // 完全跑完才会在末尾抛出），此时 pipeline 会"成功"落盘一个不完整的文件。真正的信号是
+        // busboy 在文件流对象上打的 `truncated` 标记（@fastify/multipart 自己的 toBuffer() 也是
+        // 靠这个字段判断），必须在这里主动检查并当场当错误处理，否则残留文件不会被清理、
+        // 而且响应会等到整个请求体读完才报错。
+        if ((part.file as unknown as { truncated?: boolean }).truncated) {
+          throw new ProjectError(413, "E_FILE_TOO_LARGE", `文件超出大小限制（512MB）：${part.filename}`);
+        }
+      } catch (err) {
+        // 写入中途失败（含上面的超限截断）不留残留文件。
+        await unlink(dest).catch(() => {});
+        throw err;
+      }
+      existingNames.add(filename);
       saved.push(filename);
     }
 

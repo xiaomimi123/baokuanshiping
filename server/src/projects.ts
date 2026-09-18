@@ -242,14 +242,29 @@ export async function applyVariables(name: string, defs: VariableDef[], values: 
     if (typeof newValue !== "string") {
       throw new ProjectError(400, "E_BAD_VALUE", `变量「${def.label}」的值必须是字符串`);
     }
+    if (newValue.trim() === "") {
+      throw new ProjectError(400, "E_BAD_VALUE", `变量「${def.label}」不能为空`);
+    }
+    let normalizedValue = newValue;
     if (def.kind === "asset") {
+      // 双保险：裸文件名（不含 "/"，如前端历史版本或外部调用方直接传文件名）视为落在
+      // assets/uploads/ 下的素材，规范化为 upstream 要求的显式相对路径形态（见下方注释）。
+      if (!normalizedValue.includes("/")) {
+        normalizedValue = `./assets/uploads/${normalizedValue}`;
+      }
       const uploadsDir = join(dir, "assets/uploads");
-      const assetPath = resolve(dir, newValue);
+      const assetPath = resolve(dir, normalizedValue);
       if (!assetPath.startsWith(uploadsDir + sep) || !existsSync(assetPath)) {
         throw new ProjectError(400, "E_ASSET_NOT_FOUND", `变量「${def.label}」引用的素材不存在：${newValue}`);
       }
+      // hypit 的 asset 解析（packages/workspace-fs-node）要求 source 必须以 "./" 或 "../" 开头，
+      // 否则报 UNSUPPORTED_SOURCE_ASSET "must be relative"（已用 podcast 模板 + hypit check
+      // --json 实测确认）；写回 SVML 的值必须满足这个形态，仅在 uploads 内校验通过是不够的。
+      if (!normalizedValue.startsWith("./") && !normalizedValue.startsWith("../")) {
+        normalizedValue = `./${normalizedValue}`;
+      }
     }
-    entries.push({ key, def, newValue });
+    entries.push({ key, def, newValue: normalizedValue });
   }
 
   /**

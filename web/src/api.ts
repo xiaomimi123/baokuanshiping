@@ -57,7 +57,7 @@ export type TemplateInfo = {
   title: string;
   description: string;
   requires: { capability: string; label: string }[];
-  variables: { key: string; label: string; kind: "text" | "number" | "asset" }[];
+  variables: { key: string; label: string; kind: "text" | "number" | "asset"; initial?: string }[];
   cover?: string;
   availability: { ok: boolean; missing: string[] };
 };

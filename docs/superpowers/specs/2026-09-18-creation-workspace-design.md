@@ -34,7 +34,7 @@
 - `GET /api/projects` → 扫描 `projects/*/.workbench.json` 列表（default 除外；无元数据的目录忽略）
 - `POST /api/projects` body `{ template, title }` → 生成目录名（拼音/slug + 短随机）、复制模板（排除其 node_modules/.hypit）、写 `.workbench.json`、准备 Profile（§3）→ 返回项目详情
 - `GET /api/projects/:name` → 元数据 + 变量当前值 + 素材清单（assets/uploads/ 下文件名/大小/类型）
-- `POST /api/projects/:name/assets`（multipart，≤500MB/文件，仅 video/audio/image 常见类型）→ 存 `assets/uploads/`，文件名 slug 化防穿越；同名覆盖
+- `POST /api/projects/:name/assets`（multipart，≤512MB/文件，仅 video/audio/image 常见类型）→ 存 `assets/uploads/`，文件名 slug 化防穿越；同名覆盖
 - `DELETE /api/projects/:name/assets/:file`
 - `PUT /api/projects/:name/variables` body `{ values }` → 按模板变量描述写回 .svml（§5 机制），非法值 400
 - `POST /api/projects/:name/transcribe` body `{ asset }` → `hypit transcribe`（CLI 用法实现期核对），返回字幕文本；转写 endpoint 未配置时 409 + 引导文案

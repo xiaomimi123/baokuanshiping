@@ -1,30 +1,27 @@
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, type BuildOutput, type BuildOutputs, type BuildStatus, type BuildsList } from "../api";
 
 export default function Builds() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [list, setList] = useState<BuildsList | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [selectedProject, setSelectedProject] = useState<string | undefined>(undefined);
+  // 选中态存活于 URL 的 ?project=&id= 查询参数（而非 sessionStorage）：刷新页面、分享链接、
+  // 浏览器前进/后退都能保持/还原选中的 build（I7）。新建项目的 build 不在默认（default 项目）
+  // 列表里，选中态靠 project 参数维持。
+  const selected = searchParams.get("id");
+  const selectedProject = searchParams.get("project") ?? undefined;
   const [detail, setDetail] = useState<BuildStatus["build"]>(null);
   const [logs, setLogs] = useState("");
   const [outputs, setOutputs] = useState<BuildOutput[] | null>(null);
   const [outputsError, setOutputsError] = useState("");
   const [error, setError] = useState("");
 
-  // 从创作页跳转过来：sessionStorage 里存了 {buildId, project}，读一次即自动选中该 build。
-  // 新建项目的 build 不在默认（default 项目）列表里，选中态靠这里传入的 project 维持——刷新页面会丢失。
-  useEffect(() => {
-    const raw = sessionStorage.getItem("workbench.selectedBuild");
-    if (!raw) return;
-    sessionStorage.removeItem("workbench.selectedBuild");
-    try {
-      const parsed = JSON.parse(raw) as { buildId?: string; project?: string };
-      if (parsed.buildId) {
-        setSelected(parsed.buildId);
-        setSelectedProject(parsed.project);
-      }
-    } catch { /* 忽略脏数据 */ }
-  }, []);
+  const select = useCallback((buildId: string, project?: string) => {
+    const next = new URLSearchParams();
+    next.set("id", buildId);
+    if (project) next.set("project", project);
+    setSearchParams(next);
+  }, [setSearchParams]);
 
   const load = useCallback(async (before?: string) => {
     try {
@@ -90,7 +87,7 @@ export default function Builds() {
         <thead><tr><th>ID</th><th>标题</th><th>状态</th><th>创建时间</th><th>产物</th></tr></thead>
         <tbody>
           {list?.builds.map((b) => (
-            <tr key={b.id} onClick={() => { setSelected(b.id); setSelectedProject(undefined); }}>
+            <tr key={b.id} onClick={() => select(b.id)}>
               <td style={{ fontFamily: "monospace" }}>{b.id.slice(0, 12)}</td>
               <td>{b.title ?? b.run ?? "—"}</td>
               <td><span className={"badge " + (b.outcome === "complete" ? "badge-ok" : b.outcome === "failed" ? "badge-err" : "badge-warn")}>{b.outcome}</span></td>
@@ -157,7 +154,7 @@ function OutputPreview({ output, downloadUrl, previewUrl }: { output: BuildOutpu
   const isComposite = output.kind === "composite";
 
   return (
-    <div style={{ border: "1px solid var(--border, #333)", borderRadius: 8, padding: 12 }}>
+    <div style={{ border: "1px solid var(--line)", borderRadius: 8, padding: 12 }}>
       <div className="row">
         <strong>{output.name}</strong>
         {output.target && <span className="badge">target</span>}

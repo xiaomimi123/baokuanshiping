@@ -19,7 +19,7 @@ hpyit爆款视频复刻/
     │   ├── Dockerfile.dockerignore # 构建时忽略的文件（配合根 Dockerfile）
     │   └── smoke.sh                # 冒烟测试脚本
     ├── server/                 # 后端：Fastify + TypeScript（tsx 直跑，无需编译）
-    │   └── src/routes/         # runtime / builds / profile / auth / studio 五组路由
+    │   └── src/routes/         # runtime / builds / profile / auth / studio / templates / projects 七组路由
     ├── web/                    # 前端：Vite + React + TypeScript
     │   └── src/pages/          # 总览 / 创作 / 模型与服务 / 任务 / Studio 五个页面
     └── projects/default/       # Hypit 项目本地包（git 跟踪源码，dist/ 不跟踪）
@@ -149,7 +149,7 @@ Docker 中 `HYPIT_REPO=/opt/hypit`、`HYPIT_PROJECT=/projects/default` 已在 `d
 ## 已知限制
 
 - **Apple Silicon 上软件渲染较慢**：容器内 Chromium 因 Docker 默认 seccomp 禁用户命名空间而无法用 GPU/沙箱加速，`browserGpu` 固定为 `software`，HyperFrames 本地渲染耗时会明显长于宿主机原生浏览器。
-- **ffmpeg 单独从 Debian trixie 装，不用 bookworm 基础镜像自带的版本**：`node:22-bookworm` 自带 ffmpeg 5.1.9 在本镜像（aarch64）实测有 AAC 编码时长舍入问题——用 `-c:a aac` 把一段精确 8 秒的静音音轨编码进 mp4 后，`ffprobe` 量出的时长变成 7.936s（少 3072 个采样），而 hypit 最终 mux 步骤对采样数做严格校验（容不下 1 个采样的误差），会导致**所有带音轨的 Build**（含创作页任意模板，哪怕是纯本地免模型的对话动画）在最后一步 100% 失败，报 `Final mux audio presentation span differs from TimelineAudio`。`docker/Dockerfile` 因此额外加了一条从 `deb.debian.org/debian trixie` 只装 `ffmpeg` 单个包（及其依赖的 `libavcodec61` 等）的 `RUN`，其余系统包仍锁在 bookworm，未做全局跨发行版升级；trixie 的 ffmpeg 7.1.5 同一条命令量出精确的 8.000000s，问题已在上游修复。
+- **ffmpeg 单独从 Debian trixie 装，不用 bookworm 基础镜像自带的版本；这实质是一次有意的局部跨发行版升级**：`node:22-bookworm` 自带 ffmpeg 5.1.9 在本镜像（aarch64）实测有 AAC 编码时长舍入问题——用 `-c:a aac` 把一段精确 8 秒的静音音轨编码进 mp4 后，`ffprobe` 量出的时长变成 7.936s（少 3072 个采样），而 hypit 最终 mux 步骤对采样数做严格校验（容不下 1 个采样的误差），会导致**所有带音轨的 Build**（含创作页任意模板，哪怕是纯本地免模型的对话动画）在最后一步 100% 失败，报 `Final mux audio presentation span differs from TimelineAudio`。`docker/Dockerfile` 因此额外加了一条从 `deb.debian.org/debian trixie` 用 `-t trixie` 装 `ffmpeg` 的 `RUN`；但 `-t trixie` 只锁定 ffmpeg 这一个目标包，apt 依赖解析仍会按需连带把 `libavcodec61` 等依赖、以及 `libc6`/`base-files` 等基础包一并从 trixie 装或升级——镜像内 `cat /etc/debian_version` 会如实自报 `trixie/sid`（Debian 13），并非仍停留在 bookworm。这是为解决上述 ffmpeg bug 而接受的有意的部分跨发行版升级，装完即删掉 `/etc/apt/sources.list.d/trixie.list` 防止后续 `RUN` 层意外继续从 trixie 拉取其他包；trixie 的 ffmpeg 7.1.5 同一条命令量出精确的 8.000000s，问题已在上游修复。后续跟进项：评估直接切换到 `node:22-trixie` 基础镜像，避免这种"镜像标签与实际系统版本不一致"的维护负担。
 - **Studio 经 socat 转发**：`hypit studio` 只能监听 `127.0.0.1`，无法直接对容器外暴露；`workbench` 服务用 `socat` 把内部 `5180` 转发到对外 `5179`，多一跳网络代理，属预期行为而非 bug。
 - **凭据 file store 为明文卷**：容器内没有 OS 级钥匙串，`@hypit/credential-store-file` 把 API Key 明文存放在 `hypit-home` 卷下的 `credentials/` 目录中，仅适合本机单人使用场景，不要把该卷同步到不受信任的位置。
 - **单人 / 无鉴权**：Compose 只绑定 `127.0.0.1`，不做多用户或登录鉴权，不要直接暴露到公网。
@@ -158,6 +158,7 @@ Docker 中 `HYPIT_REPO=/opt/hypit`、`HYPIT_PROJECT=/projects/default` 已在 `d
 - **前端能力范围收窄**：Build 产物内联预览（任务详情页 video/image 内联播放 + 下载）已实现（`GET /api/builds/:id/outputs` 拉产物清单 + 既有 `GET /api/builds/:id/outputs/:name` 下载）；仍未实现的是 WhisperX 配置卡、Profile 保存前 diff 预览，留待后续迭代。
 - **`docker compose restart` 会连带杀掉 workbench**：`workbench` 与 `runtime` 共享 PID 命名空间（`pid: "service:runtime"`），重启 runtime 容器会销毁该命名空间导致 workbench 以 137 退出。重启后用 `docker compose up -d` 把 workbench 拉回，或直接用 `docker compose down && docker compose up -d`。
 - **容器与宿主机各自维护 `@hypit` symlink**：`docker-compose.yml` 给两个服务的 `/projects/default/node_modules` 都加了匿名卷，让容器每次启动重建的 `@hypit/hypit`（指向镜像内 `/opt/hypit`）不会写穿到宿主机 bind mount、覆盖宿主机 `pnpm providers:setup` 建的 symlink（指向 `$HYPIT_REPO`）。代价是两边各自独立、互不同步：如果宿主机上直接跑 provider 包测试报找不到 `@hypit/hypit` 或 `@hypit/driver-node`，在仓库根目录跑一次 `pnpm providers:setup` 重建宿主机自己的 symlink 即可。
+- **产物预览无 Range/206 支持**：`GET /api/builds/:id/outputs/:name` 每次请求都会重新跑一次 `hypit get` 把产物导出到临时文件再整份 `send`，不支持 `Range` 请求头/`206 Partial Content`，大视频在浏览器里无法拖动 seek（只能从头顺序播放），且每次打开预览都会触发一次完整的临时文件导出（额外磁盘 I/O 与耗时，产物越大越明显）。
 - **方舟视频生成任务提交无幂等键**：`createVolcengineProvider` 的 `start()` 提交任务后若在 `requestTimeoutMs` 内没拿到响应（网络中断、超时等），本地会判定该次 `start` 失败并可能被上层重试；但方舟侧的任务可能已经创建成功并开始计费，重试会再次提交产生第二个任务。由于方舟"创建视频生成任务"接口未提供幂等键（如 `Idempotency-Key`）参数，直连 Provider 目前无法规避这种"远端已产生计费任务但本地未记录其 taskId、后续也不会被继续轮询"的重复提交风险。
 
 ## 验证状态

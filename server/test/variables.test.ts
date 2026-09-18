@@ -114,7 +114,23 @@ describe("applyVariables", () => {
     ];
 
     await projects.applyVariables("proj-e", defs, { cover: "assets/uploads/new.png" });
-    expect(await readFile(join(dir, "chat.svml"), "utf8")).toBe("asset: assets/uploads/new.png");
+    // upstream（packages/workspace-fs-node resolveAsset）要求 source 必须以 "./" 或 "../" 开头，
+    // 否则报 UNSUPPORTED_SOURCE_ASSET；applyVariables 写回前会补上这个前缀（见 C1 修复）。
+    expect(await readFile(join(dir, "chat.svml"), "utf8")).toBe("asset: ./assets/uploads/new.png");
+  });
+
+  it("kind:asset 裸文件名（不含 /）被规范化为 ./assets/uploads/<name> 后校验通过", async () => {
+    await setupProject("proj-e2", "asset: old.png");
+    const dir = projects.projectDir("proj-e2");
+    await writeFile(join(dir, "assets/uploads", "bare.png"), "fake-bytes");
+    const defs: import("../src/templates.js").VariableDef[] = [
+      { key: "cover", label: "封面素材", kind: "asset", file: "chat.svml", anchor: "old.png" },
+    ];
+
+    // 裸名（无 "/"）视为落在 assets/uploads/ 下的素材，自动规范化后再校验，双保险防止
+    // 前端/外部调用方误传裸文件名时被 E_ASSET_NOT_FOUND 拒绝。
+    await projects.applyVariables("proj-e2", defs, { cover: "bare.png" });
+    expect(await readFile(join(dir, "chat.svml"), "utf8")).toBe("asset: ./assets/uploads/bare.png");
   });
 
   it("3 变量批次中第 2 个锚点不唯一 → 预校验阶段整体失败，所有文件与 meta 均不变", async () => {
@@ -151,6 +167,27 @@ describe("applyVariables", () => {
     expect(await readFile(join(dir, "chat.svml"), "utf8")).toBe("A one, beta B, C three");
     const meta = await projects.readMeta("proj-h");
     expect(meta.variables).toEqual({ k1: "A", k2: "B", k3: "C" });
+  });
+
+  it("trim 后为空的新值 → 400 E_BAD_VALUE（消息含 label），dry-run 阶段拒绝，磁盘零改动", async () => {
+    const content = "hello world";
+    await setupProject("proj-i2", content);
+    const defs: import("../src/templates.js").VariableDef[] = [
+      { key: "title", label: "标题", kind: "text", file: "chat.svml", anchor: "world" },
+    ];
+
+    let error: unknown;
+    try {
+      await projects.applyVariables("proj-i2", defs, { title: "   " });
+    } catch (err) {
+      error = err;
+    }
+    expect(error).toMatchObject({ status: 400, code: "E_BAD_VALUE" });
+    expect((error as Error).message).toContain("标题");
+    const dir = projects.projectDir("proj-i2");
+    expect(await readFile(join(dir, "chat.svml"), "utf8")).toBe(content); // 磁盘零改动
+    const meta = await projects.readMeta("proj-i2");
+    expect(meta.variables).toBeUndefined(); // meta 也未改动（dry-run 阶段就拒）
   });
 
   it("原子写：替换后目标目录不残留 .tmp 文件", async () => {

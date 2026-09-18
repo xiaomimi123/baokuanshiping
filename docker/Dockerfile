@@ -15,9 +15,14 @@ RUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=60 update \
 # 产物做严格的采样数校验（容不下 1 个采样的误差），因而任何带音轨的 Build（含创作页 chat 模板的
 # 静音占位音轨）在最后一步 100% 失败，报 "Final mux audio presentation span differs from
 # TimelineAudio"（渲染帧本身完全正常，只坏在这最后一次 mux）。手工用同一条 ffmpeg 命令对比过
-# Debian trixie 的 ffmpeg 7.1.5——量出精确的 8.000000s，问题已在上游修复。这里只从 trixie 装
-# ffmpeg 这一个包（及其依赖的 libavcodec61 等，走 apt 正常依赖解析），其余系统包仍锁在 bookworm，
-# 不做全局跨发行版升级。
+# Debian trixie 的 ffmpeg 7.1.5——量出精确的 8.000000s，问题已在上游修复。
+# 如实说明（I5）：`-t trixie ffmpeg` 不是"只装 ffmpeg 一个包"——apt 依赖解析会连带把
+# libavcodec61 等一批依赖也从 trixie 装（或升级），其中包括 libc6/glibc、base-files 等基础包，
+# 结果容器内 `cat /etc/debian_version`／`os-release` 会自报 Debian 13（trixie），而不是 bookworm。
+# 这是一次有意为之的、局部但确实跨发行版的升级：只为解决上面这个 ffmpeg bug，接受"基础库版本
+# 与镜像标签不完全一致"的代价，而非把整个系统升级到 trixie。装完即删 sources.list.d/trixie.list，
+# 防止后续任何 `apt-get upgrade`/`install`（未来维护者添加的新 RUN 层）意外从 trixie 漂移拉取
+# 更多包——trixie 源只在这一层临时启用。
 RUN echo "deb http://deb.debian.org/debian trixie main" > /etc/apt/sources.list.d/trixie.list \
     && apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=60 update \
     && ( ok=0; for i in 1 2 3 4 5; do \
@@ -25,7 +30,8 @@ RUN echo "deb http://deb.debian.org/debian trixie main" > /etc/apt/sources.list.
            && ok=1 && break; \
          echo "apt-get install ffmpeg(trixie) retry $i failed, retrying..."; sleep 5; \
        done; test "$ok" = "1" ) \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && rm /etc/apt/sources.list.d/trixie.list
 # uv（WhisperX 等 Managed Program 需要；官方安装脚本）
 RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 # Docker 内默认 seccomp 禁用户命名空间，chromium 需 --no-sandbox 包装

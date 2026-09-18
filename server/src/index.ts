@@ -15,6 +15,13 @@ import { studioRoutes } from "./routes/studio.js";
 import { templatesRoutes } from "./routes/templates.js";
 import { projectsRoutes } from "./routes/projects.js";
 
+/** 4xx 客户端错误的最小结构判断（不要求是某个具体错误类，@fastify/multipart 等第三方插件的错误也适用）。 */
+function isClientError(error: unknown): error is Error & { statusCode: number; code?: string } {
+  if (!(error instanceof Error)) return false;
+  const statusCode = (error as unknown as Record<string, unknown>).statusCode;
+  return typeof statusCode === "number" && statusCode >= 400 && statusCode < 500;
+}
+
 export function buildServer() {
   const app = Fastify({ logger: true });
   app.setErrorHandler((error, _req, reply) => {
@@ -22,6 +29,10 @@ export function buildServer() {
       reply.status(502).send({ error: { code: error.code, message: error.message } });
     } else if (error instanceof ProjectError) {
       reply.status(error.status).send({ error: { code: error.code, message: error.message } });
+    } else if (isClientError(error)) {
+      // 4xx 透传：例如 @fastify/multipart 超出 fileSize 限制时抛的 FST_REQ_FILE_TOO_LARGE（413）——
+      // 之前落到 else 分支被错误地包成 500，掩盖了真实的客户端错误语义（I4）。
+      reply.status(error.statusCode).send({ error: { code: error.code ?? "E_REQUEST", message: error.message } });
     } else {
       app.log.error(error);
       const message = error instanceof Error ? error.message : String(error);
