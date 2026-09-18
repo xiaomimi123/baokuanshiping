@@ -36,6 +36,18 @@ export type BuildStatus = {
     operations?: { endpoint: string; state: string; count?: number; progress?: { phase: string; completed?: number; total?: number } ; failure?: { code: string; message: string } }[];
   } | null;
 };
+export type BuildOutput = {
+  name: string;
+  type: string;
+  kind: "scalar" | "resource" | "composite";
+  target: boolean;
+  highlighted: boolean;
+  mediaType?: string;
+  size?: number;
+};
+export type BuildOutputs = {
+  build: { id: string; outputs: BuildOutput[]; outputCount: number };
+};
 export type AuthStatus = {
   endpoint: string;
   credentials: { slot: string; label: string; kind: string; configured: boolean; writable: boolean }[];

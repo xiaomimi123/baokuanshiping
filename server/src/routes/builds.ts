@@ -67,6 +67,25 @@ export async function buildsRoutes(app: FastifyInstance) {
     },
   );
 
+  // `hypit inspect <id> --json` 透传：GET /api/builds/:id 走的 `hypit status` 不含产物名/MIME
+  // （CliBuildStatusView.result 只有 outputCount），核对 packages/cli/src/view.ts 后确认要拿
+  // 产物清单（name/mediaType/kind）必须用 `hypit inspect`（CliBuildResultView.outputs）另开一路由。
+  app.get<{ Params: { id: string }; Querystring: { project?: string } }>(
+    "/api/builds/:id/outputs",
+    async (req, reply) => {
+      let cwd: string | undefined;
+      try {
+        cwd = await resolveBuildCwd(req.query.project);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+          return reply.status(404).send({ error: { code: "E_NOT_FOUND", message: `项目不存在：${req.query.project}` } });
+        }
+        throw err;
+      }
+      return runHypit(["inspect", req.params.id, "--verbose"], { cwd });
+    },
+  );
+
   app.get<{ Params: { id: string; name: string }; Querystring: { project?: string } }>(
     "/api/builds/:id/outputs/:name",
     async (req, reply) => {
