@@ -60,15 +60,33 @@
         "defaultConcurrency": 2,
         "requestTimeoutMs": 180000
       }
+    },
+    "apimart.default": {
+      "use": "@workbench/provider-apimart",
+      "config": {
+        "baseUrl": "https://api.apimart.ai",
+        "apiKey": { "store": "file", "key": "apimart.key" },
+        "modelMap": {
+          "seedance-2": "seedance-2.0",
+          "seedance-2-fast": "",
+          "seedance-2-mini": "",
+          "seedance-2.5": "",
+          "gpt-image-2": "gpt-image-2"
+        },
+        "defaultConcurrency": 2,
+        "pollIntervalMs": 8000,
+        "requestTimeoutMs": 120000,
+        "maxOperationMs": 1200000
+      }
     }
   },
   "bindings": {
-    "@hypit/seedance@1#seedance-2": "volcengine.default",
+    "@hypit/seedance@1#seedance-2": "apimart.default",
     "@hypit/seedance@1#seedance-2-fast": "volcengine.default",
     "@hypit/seedance@1#seedance-2-mini": "volcengine.default",
     "@hypit/seedance@1#seedance-2.5": "volcengine.default",
     "@hypit/seedream@1#seedream-5-lite": "volcengine.default",
-    "@hypit/gpt-image@1#gpt-image-2": "openai.images",
+    "@hypit/gpt-image@1#gpt-image-2": "apimart.default",
     "@hypit/nano-banana@1#nano-banana-2": "gemini.images",
     "@hypit/nano-banana@1#nano-banana-pro": "gemini.images"
   }

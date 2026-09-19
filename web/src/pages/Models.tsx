@@ -80,6 +80,31 @@ const PROVIDERS: ProviderDef[] = [
       "@hypit/nano-banana@1#nano-banana-pro": "gemini.images",
     },
   },
+  {
+    instance: "apimart.default", use: "@workbench/provider-apimart", title: "APIMart 聚合",
+    desc: "Seedance 生视频 + GPT Image 生图 · 一个 Key 通用", credLabel: "APIMart API Key",
+    models: [
+      ["seedance-2", "Seedance 2.0"],
+      ["seedance-2-fast", "Seedance 2.0 Fast"],
+      ["seedance-2-mini", "Seedance 2.0 Mini"],
+      ["seedance-2.5", "Seedance 2.5"],
+      ["gpt-image-2", "GPT Image 2"],
+    ],
+    modelField: "modelMap",
+    defaults: {
+      baseUrl: "https://api.apimart.ai",
+      apiKey: { store: "file", key: "apimart.key" },
+      modelMap: {
+        "seedance-2": "seedance-2.0", "seedance-2-fast": "", "seedance-2-mini": "", "seedance-2.5": "",
+        "gpt-image-2": "gpt-image-2",
+      },
+      defaultConcurrency: 2, pollIntervalMs: 8000, requestTimeoutMs: 120000, maxOperationMs: 1200000,
+    },
+    bindings: {
+      "@hypit/seedance@1#seedance-2": "apimart.default",
+      "@hypit/gpt-image@1#gpt-image-2": "apimart.default",
+    },
+  },
 ];
 
 export default function Models() {
